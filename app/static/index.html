@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ユニエア队伍优化算分模拟器</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+    />
+    <link rel="stylesheet" href="/static/styles.css?v=20260302_78" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-grid"></div>
+
+    <main class="page">
+      <header class="app-topbar fade-in">
+        <div class="app-brand-wrap">
+          <div class="app-logo-mark" aria-hidden="true">
+            <img src="/static/uoa-logo.svg" alt="UNI'S ON AIR" />
+          </div>
+          <div class="app-brand-copy">
+            <h1 id="appProjectTitle" class="app-project-title">ユニエア队伍优化算分模拟器</h1>
+          </div>
+        </div>
+      </header>
+      <section class="workspace-grid panel workspace-shell fade-in">
+        <section class="workspace-left">
+          <div class="panel-head">
+            <h2>卡片筛选</h2>
+          </div>
+
+          <aside class="filter-sidebar">
+            <details class="filter-fold" open>
+              <summary>基础筛选</summary>
+              <div class="filter-fold-body">
+                <div class="skill-tags-wrap compact">
+                  <span>颜色</span>
+                  <div id="qColorTags" class="skill-tags"></div>
+                </div>
+                <div class="skill-tags-wrap compact">
+                  <span>团体</span>
+                  <div id="qGroupTags" class="skill-tags"></div>
+                </div>
+                <div class="skill-tags-wrap compact">
+                  <span>排序</span>
+                  <div id="qSortTags" class="skill-tags"></div>
+                </div>
+                <div class="skill-tags-wrap compact">
+                  <span>系列</span>
+                  <div id="qSeriesTags" class="skill-tags"></div>
+                </div>
+                <div class="skill-tags-wrap compact">
+                  <span>期望标签</span>
+                  <div id="qSkillTags" class="skill-tags"></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="filter-fold" open>
+              <summary>成员筛选</summary>
+              <div class="filter-fold-body">
+                <div id="memberPicker" class="member-picker"></div>
+              </div>
+            </details>
+          </aside>
+          <div id="teamSlots" class="hidden"></div>
+        </section>
+
+        <section class="workspace-right">
+          <section class="workspace-right-panel">
+            <div class="panel-head card-list-head">
+              <h2>
+                成员卡列表
+                <span id="filterCount" class="head-count">（候选卡: 0）</span>
+              </h2>
+            </div>
+
+            <div class="integrated-settings result-opt-wrap">
+              <div class="panel-head compact-head">
+                <h2>算分设置</h2>
+              </div>
+
+              <div class="profile-toolbar top-profile-toolbar">
+                <label class="profile-select-wrap">
+                  账号配置
+                  <select id="profileSelect"></select>
+                </label>
+                <div class="profile-actions">
+                  <button id="loadProfileBtn" class="btn-sub" type="button">读取账号</button>
+                  <button id="openProfileBuilderBtn" class="btn-sub" type="button">新建账号</button>
+                  <button id="saveProfileBtn" class="btn-sub" type="button">保存账号</button>
+                  <button id="deleteProfileBtn" class="btn-sub danger" type="button">删除账号</button>
+                </div>
+              </div>
+              <p id="profileHint" class="card-meta">未选择账号配置；当前使用页面参数。</p>
+
+              <div class="options-grid top-settings-grid">
+                <label>
+                  模式
+                  <select id="mode">
+                    <option value="single">单曲</option>
+                    <option value="color">按颜色全部歌曲</option>
+                    <option value="all">全部歌曲</option>
+                  </select>
+                </label>
+                <label id="songSelectWrap">
+                  选择歌曲
+                  <select id="songKey"></select>
+                </label>
+                <label id="songColorWrap" class="hidden">
+                  歌曲颜色
+                  <select id="songColor">
+                    <option value="ALL">ALL</option>
+                    <option value="R">Red</option>
+                    <option value="B">Blue</option>
+                    <option value="G">Green</option>
+                    <option value="Y">Yellow</option>
+                    <option value="P">Purple</option>
+                  </select>
+                </label>
+                <label>
+                  group 总综合力
+                  <input id="groupPower" type="number" min="1" step="1" value="1800000" />
+                </label>
+                <label>
+                  试行回数
+                  <input id="trials" type="number" min="100" max="50000" step="100" value="10000" />
+                </label>
+                <label>
+                  排序
+                  <select id="sortBy">
+                    <option value="+2sigma">+2σ</option>
+                    <option value="median">median</option>
+                    <option value="+1sigma">+1σ</option>
+                    <option value="+3sigma">+3σ</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="options-grid opt-inline-grid">
+                <label>
+                  前N队伍
+                  <input id="optTopN" type="number" min="1" max="30" step="1" value="5" />
+                </label>
+                <label>
+                  候选卡池
+                  <select id="optPoolScope">
+                    <option value="owned" selected>仅持有卡池（默认）</option>
+                    <option value="all">全卡池</option>
+                  </select>
+                </label>
+                <div class="opt-inline-actions">
+                  <button id="resetFiltersQuick" class="btn-sub" type="button">一键重置筛选</button>
+                  <button id="runOptimizeQuickBtn" class="btn-sub" type="button">一键全卡池Top5</button>
+                  <button id="runOptimizeBtn" class="btn-main" type="button">最优配队</button>
+                </div>
+              </div>
+              <p id="optSummary" class="card-meta">队长候选: 自动 | 必带: 0 | 账号: 默认 | 卡池: 仅持有</p>
+              <span id="optState" class="state"></span>
+              <span id="runState" class="state"></span>
+              <div class="progress-wrap hidden" id="optProgressWrap">
+                <div class="progress-bar">
+                  <div class="progress-inner" id="optProgressBar"></div>
+                </div>
+                <div class="card-meta" id="optProgressText">准备中…</div>
+              </div>
+            </div>
+
+            <div class="list-toolbar">
+              <div class="search-input-wrap">
+                <span class="search-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path d="M15.8 14.4h-.7l-.2-.2a5.8 5.8 0 1 0-.6.6l.2.2v.7L19 20 20.4 18.6l-4.6-4.2Zm-5.4 0a4.4 4.4 0 1 1 0-8.8 4.4 4.4 0 0 1 0 8.8Z"></path>
+                  </svg>
+                </span>
+                <input id="qSearch" type="text" placeholder="搜索：成员名 / 罗马音 / 卡名" />
+              </div>
+              <span id="ownedSummary" class="head-count head-owned">持有卡池: 0 张 | 全卡池</span>
+              <div class="list-scope-wrap">
+                <select id="cardListScope">
+                  <option value="all" selected>全卡池</option>
+                  <option value="owned">仅持有</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="card-list" id="cardList"></div>
+          </section>
+        </section>
+      </section>
+
+      <section class="panel result-panel full-span">
+        <div class="panel-head">
+          <h2>结果（点击成员可进行横向对比）</h2>
+          <p id="resultHint"></p>
+        </div>
+        <div id="resultArea"></div>
+      </section>
+    </main>
+
+    <div id="profileBuilderModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-profile-modal></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>新建账号</h3>
+          <button id="closeProfileBuilderBtn" class="btn-sub tiny" type="button">关闭</button>
+        </div>
+        <div class="modal-main">
+          <div class="profile-builder-top">
+            <label>
+              账号名
+              <input id="builderProfileName" type="text" placeholder="例如：琴原美名" />
+            </label>
+            <label>
+              group 总综合力
+              <input id="builderGroupPower" type="number" min="0" step="1" placeholder="0" />
+            </label>
+          </div>
+          <p class="card-meta">group 总综合力与成员分未填写按 0 处理。</p>
+          <div id="builderMemberPoints" class="builder-member-points"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="saveProfileBuilderBtn" class="btn-main" type="button">保存新账号</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="excludedModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-excluded-modal></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>排除池</h3>
+          <button id="closeExcludedModalBtn" class="btn-sub tiny" type="button">关闭</button>
+        </div>
+        <div class="modal-main">
+          <p id="excludedHint" class="card-meta">排除池用于剔除未持有卡，支持逐张恢复。</p>
+          <div class="excluded-filters">
+            <label class="excluded-search">
+              搜索
+              <input id="excludedSearch" type="text" placeholder="成员名 / 卡名 / 编号" />
+            </label>
+            <div class="excluded-filter-group">
+              <span>颜色</span>
+              <div id="excludedColorFilters" class="excluded-chip-row"></div>
+            </div>
+            <div class="excluded-filter-group">
+              <span>团体</span>
+              <div id="excludedGroupFilters" class="excluded-chip-row"></div>
+            </div>
+            <div class="excluded-filter-group">
+              <span>系列</span>
+              <div id="excludedSeriesFilters" class="excluded-chip-row"></div>
+            </div>
+          </div>
+          <div id="excludedList" class="excluded-list"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="restoreAllExcludedBtn" class="btn-sub" type="button">全部恢复</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="teamReplaceModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-team-replace-modal></div>
+      <div class="modal-card replace-modal-card">
+        <div class="modal-head">
+          <h3>队伍换卡对比</h3>
+          <button id="closeTeamReplaceModalBtn" class="btn-sub tiny" type="button">关闭</button>
+        </div>
+        <div class="modal-main">
+          <p id="teamReplaceHint" class="card-meta">选择要替换的卡位与候选卡。</p>
+          <div id="teamReplaceCurrent" class="replace-current-strip"></div>
+          <div class="replace-workspace">
+            <section class="replace-pane replace-pane-left">
+              <div class="replace-filters">
+                <div class="excluded-filter-group">
+                  <span>颜色</span>
+                  <div id="teamReplaceColorFilters" class="excluded-chip-row"></div>
+                </div>
+                <div class="excluded-filter-group">
+                  <span>团体</span>
+                  <div id="teamReplaceGroupFilters" class="excluded-chip-row"></div>
+                </div>
+                <div class="excluded-filter-group">
+                  <span>系列</span>
+                  <div id="teamReplaceSeriesFilters" class="excluded-chip-row"></div>
+                </div>
+                <div class="excluded-filter-group replace-member-group">
+                  <div class="replace-member-head">
+                    <span>成员</span>
+                    <span id="teamReplaceMemberSelected" class="card-meta">全部成员</span>
+                    <button id="teamReplaceClearMembersBtn" class="btn-sub tiny" type="button">清空成员</button>
+                  </div>
+                  <div id="teamReplaceMemberPicker" class="member-picker replace-member-picker"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="replace-pane replace-pane-right">
+              <div class="replace-candidate-panel">
+                <div class="replace-search-grid">
+                  <label class="replace-search-field">
+                    <span>搜索</span>
+                    <div class="search-input-wrap replace-search-input-wrap">
+                      <span class="search-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                          <path d="M15.8 14.4h-.7l-.2-.2a5.8 5.8 0 1 0-.6.6l.2.2v.7L19 20 20.4 18.6l-4.6-4.2Zm-5.4 0a4.4 4.4 0 1 1 0-8.8 4.4 4.4 0 0 1 0 8.8Z"></path>
+                        </svg>
+                      </span>
+                      <input id="teamReplaceSearch" type="text" placeholder="搜索：成员名 / 罗马音 / 卡名" />
+                    </div>
+                  </label>
+                  <label class="replace-scope-field">
+                    <span>候选范围</span>
+                    <select id="teamReplacePoolScope">
+                      <option value="all">全卡池</option>
+                      <option value="owned">仅持有</option>
+                    </select>
+                  </label>
+                  <label class="replace-own-field">
+                    <span>持有筛选</span>
+                    <select id="teamReplaceOwnFilter">
+                      <option value="all">全部</option>
+                      <option value="owned">已持有</option>
+                      <option value="unowned">未持有</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="replace-candidate-head">
+                  <span id="teamReplaceCount" class="card-meta">候选卡: 0</span>
+                </div>
+                <div id="teamReplaceCandidates" class="replace-candidate-list"></div>
+              </div>
+            </section>
+          </div>
+          <div class="replace-compare-wrap">
+            <h4>横向对比</h4>
+            <div id="teamReplaceCompare" class="replace-compare-body"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="teamReplaceResetBtn" class="btn-sub" type="button">恢复原队伍</button>
+          <button id="teamReplaceCalcBtn" class="btn-main" type="button">计算替换对比</button>
+        </div>
+      </div>
+    </div>
+
+    <button id="backToTopBtn" class="back-to-top-btn is-hidden" type="button" aria-label="返回顶部">
+      <span class="back-to-top-icon" aria-hidden="true">▲</span>
+      <span class="back-to-top-text">顶部</span>
+    </button>
+
+    <script src="/static/app.js?v=20260302_77"></script>
+  </body>
+</html>

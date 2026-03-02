@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-label="UNI'S ON AIR logo">
+  <g transform="translate(296,36)">
+    <polygon points="0,0 70,0 0,70" fill="#57b952"/>
+    <polygon points="430,0 360,70 430,70" fill="#76c7eb"/>
+
+    <rect x="50" y="7" width="36" height="118" rx="3" fill="#000" transform="skewX(-39)"/>
+    <rect x="118" y="7" width="36" height="118" rx="3" fill="#000" transform="skewX(-39)"/>
+    <rect x="186" y="7" width="36" height="118" rx="3" fill="#6b2eb8" transform="skewX(-39)"/>
+    <rect x="254" y="7" width="36" height="118" rx="3" fill="#000" transform="skewX(-39)"/>
+    <rect x="322" y="7" width="36" height="118" rx="3" fill="#000" transform="skewX(-39)"/>
+
+    <rect x="394" y="76" width="36" height="50" fill="#76c7eb"/>
+  </g>
+
+  <text x="480" y="264" text-anchor="middle" fill="#000" font-family="Space Grotesk, Noto Sans JP, sans-serif" font-size="96" font-weight="700" letter-spacing="2">UNI'S ON AIR</text>
+  <text x="480" y="338" text-anchor="middle" fill="#000" font-family="Noto Sans JP, sans-serif" font-size="66" font-weight="700" letter-spacing="1">ユニゾンエアー</text>
+</svg>
