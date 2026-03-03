@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: unisonair-optimizer
+    env: docker
+    autoDeploy: true
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: UOA_RUNTIME_DATA_DIR
+        value: /var/data/runtime
+      - key: UOA_DATA_ROOT
+        value: /var/data/dataset
+      - key: UOA_DATA_TARBALL_URL
+        sync: false
+    disks:
+      - name: uoa-data
+        mountPath: /var/data
+        sizeGB: 10

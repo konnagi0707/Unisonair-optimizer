@@ -78,6 +78,12 @@ uoa-scoring/
 
 > 当前仓库 `pyproject.toml` 仍有历史字段（偏 extract 流程），后续建议补齐 scoring 运行依赖。
 
+部署相关环境变量:
+
+- `UOA_RUNTIME_DATA_DIR`：运行时可写目录（账号配置/备份/icon缓存）
+- `UOA_DATA_ROOT`：只读数据根目录（需包含 `masters/`、`catalogs/`、`UOA大表 新人必看.xlsx`）
+- `UOA_DATA_TARBALL_URL`：当 `UOA_DATA_ROOT` 缺数据时，容器启动自动下载的数据包地址（`.tar.gz`）
+
 ---
 
 ## 4. 本地启动
@@ -269,6 +275,39 @@ python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765
 1. 前端静态托管 + 独立后端部署（Render/Fly.io/Railway/VPS）
 2. 一体化部署到支持 Python 的平台
 3. 本地桌面/本地服务发布（适合小圈内使用）
+
+### 推荐: Render（公网可访问）
+
+仓库已提供:
+
+- `Dockerfile`
+- `render.yaml`
+- `deploy/start.sh`
+- `deploy/ensure_dataset.sh`
+- `deploy/make_dataset_bundle.sh`
+
+步骤:
+
+1. 本地打数据包:
+
+```bash
+./deploy/make_dataset_bundle.sh
+```
+
+会生成: `deploy/dist/uoa_dataset_YYYYmmdd_HHMMSS.tar.gz`
+
+2. 把这个 `.tar.gz` 上传到可公网下载的位置（例如 Cloudflare R2/S3/GitHub Release 直链）。
+
+3. 在 Render 新建 Blueprint（选择本仓库），并设置环境变量:
+
+- `UOA_DATA_TARBALL_URL=<你上传的数据包直链>`
+
+4. 首次启动会自动下载并解压数据，随后外网可访问。
+
+说明:
+
+- 账号配置与备份存放在磁盘挂载 `/var/data/runtime`，重启不会丢。
+- 如更新 `masters/catalogs/xlsx`，重新打包并替换 `UOA_DATA_TARBALL_URL` 即可滚动更新。
 
 ## 11.3 发布前检查清单
 

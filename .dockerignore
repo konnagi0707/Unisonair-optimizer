@@ -1,4 +1,5 @@
-.DS_Store
+.git
+.gitignore
 __pycache__/
 *.pyc
 *.pyo
@@ -8,7 +9,7 @@ __pycache__/
 .venv/
 venv/
 
-# Local runtime cache
+# Local runtime cache / backups
 app/data/card_icons/
 app/data/account_profiles.json
 app/data/account_profiles_backups/
@@ -16,7 +17,4 @@ app/data/account_profiles_backups/
 # Local/generated artifacts
 reports/
 update/
-deploy/dist/
-
-# Local logs
 *.log

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import hashlib
 import threading
@@ -18,8 +19,10 @@ from pydantic import BaseModel, Field
 from .engine import ScoringEngine
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RUNTIME_DATA_DIR = ROOT / "app" / "data"
+RUNTIME_DATA_DIR = Path(os.environ.get("UOA_RUNTIME_DATA_DIR", str(DEFAULT_RUNTIME_DATA_DIR))).expanduser().resolve()
 STATIC_DIR = ROOT / "app" / "static"
-DATA_DIR = ROOT / "app" / "data"
+DATA_DIR = RUNTIME_DATA_DIR
 PROFILES_FILE = DATA_DIR / "account_profiles.json"
 PROFILES_BACKUP_DIR = DATA_DIR / "account_profiles_backups"
 PROFILES_BACKUP_KEEP = 20
@@ -670,6 +673,11 @@ def _cancel_optimize_job(job_id: str) -> dict[str, Any]:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/healthz")
+def healthz() -> dict[str, Any]:
+    return {"ok": True}
 
 
 @app.get("/api/bootstrap")

@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 import sys
 import threading
@@ -15,8 +16,12 @@ from typing import Any
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = ROOT / "tools"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = Path(os.environ.get("UOA_DATA_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
+RUNTIME_DATA_DIR = Path(
+    os.environ.get("UOA_RUNTIME_DATA_DIR", str(PROJECT_ROOT / "app" / "data"))
+).expanduser().resolve()
+TOOLS_DIR = PROJECT_ROOT / "tools"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
@@ -25,12 +30,12 @@ import zawa_score_model as zsm
 
 AXES = ("vo", "da", "pe")
 VALID_COLORS = {"R", "B", "G", "Y", "P", "ALL"}
-ACTIVE_MEMBERS_FILE = ROOT / "catalogs/active_members_manual_20260227.json"
-DEFAULT_MEMBER_POINTS_FILE = ROOT / "catalogs" / "member_points_manual_20260228.json"
+ACTIVE_MEMBERS_FILE = DATASET_ROOT / "catalogs/active_members_manual_20260227.json"
+DEFAULT_MEMBER_POINTS_FILE = DATASET_ROOT / "catalogs" / "member_points_manual_20260228.json"
 MIN_SKILL_EXPECTED = 2.0
 DEFAULT_CLIENT_ASSETS_VERSION = "20251019155458"
 KOSA_SCENE_API = "https://uniair-api.kosa3.com/api/scenes/?page_size=500&page=1"
-KOSA_SCENE_CACHE = ROOT / "catalogs" / "kosa_scene_thumb_cache.json"
+KOSA_SCENE_CACHE = DATASET_ROOT / "catalogs" / "kosa_scene_thumb_cache.json"
 KOSA_SCENE_CACHE_MAX_AGE_SEC = 24 * 3600
 
 DEFAULT_CENTER_CANDIDATES_PER_CENTER = 5
@@ -47,7 +52,7 @@ DEFAULT_OPT_MIN_SKILL_EXPECTED = 2.0
 DEFAULT_PRE_EVAL_TRIALS = 100
 
 _CDN_ASSET_BASE_TEMPLATE = "https://cdn-assets.unis-on-air.com/client_assets/{version}/Android/"
-ICON_CACHE_DIR = ROOT / "app" / "data" / "card_icons"
+ICON_CACHE_DIR = RUNTIME_DATA_DIR / "card_icons"
 ICON_FETCH_TIMEOUT_SEC = 20
 ICON_CACHE_REV = "20260302b"
 OPT_CACHE_MAX_ENTRIES = 96
@@ -393,7 +398,7 @@ def _load_card_scene_bundle_codes(masters_dir: Path) -> dict[str, dict[str, str]
 
 
 def _resolve_client_assets_version() -> str:
-    extract_root = ROOT.parent / "uoa-extract"
+    extract_root = PROJECT_ROOT.parent / "uoa-extract"
     if extract_root.exists():
         try:
             if str(extract_root) not in sys.path:
@@ -1083,8 +1088,8 @@ class ScoringEngine:
             return None
 
     def _load(self) -> None:
-        masters_dir = opt._find_latest_masters(ROOT / "masters")
-        workbook = ROOT / "UOA大表 新人必看.xlsx"
+        masters_dir = opt._find_latest_masters(DATASET_ROOT / "masters")
+        workbook = DATASET_ROOT / "UOA大表 新人必看.xlsx"
         # Full pool should include all SSR cards in masters (MV/碟卡等),
         # then filter only by expected tag threshold.
         active_name_norms = None
@@ -1119,7 +1124,7 @@ class ScoringEngine:
         char_meta_by_code, char_meta_by_name = _load_character_meta_map(masters_dir)
         active_member_groups = _load_active_member_groups(ACTIVE_MEMBERS_FILE)
         manual_member_generations = _load_manual_member_generations()
-        catalog_dir = ROOT / "catalogs"
+        catalog_dir = DATASET_ROOT / "catalogs"
         catalog_path = _pick_latest_catalog(catalog_dir)
         cloud_assets_latest = _load_cloud_asset_map(catalog_path)
         cloud_assets_merged = _load_merged_cloud_asset_map(catalog_dir)
@@ -1147,9 +1152,9 @@ class ScoringEngine:
         kosa_by_title = kosa_scene_maps.get("by_title", {})
         client_assets_version = _resolve_client_assets_version()
 
-        self._zawa_master = zsm.load_master(ROOT / "catalogs/zawa_score_sim_master.json", refresh=False)
+        self._zawa_master = zsm.load_master(DATASET_ROOT / "catalogs/zawa_score_sim_master.json", refresh=False)
 
-        songs_raw = opt._load_songlist(ROOT / "catalogs/uniair_songlist.json", refresh=False)
+        songs_raw = opt._load_songlist(DATASET_ROOT / "catalogs/uniair_songlist.json", refresh=False)
         song_payloads: list[dict[str, Any]] = []
         songs_by_key: dict[str, dict[str, Any]] = {}
         for s in songs_raw:
