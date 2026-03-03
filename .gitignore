@@ -11,6 +11,7 @@ venv/
 # Local runtime cache
 app/data/card_icons/
 app/data/account_profiles.json
+app/data/account_profiles_backups/
 
 # Local/generated artifacts
 reports/

@@ -8,7 +8,9 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=20260302_78" />
+    <link rel="preconnect" href="https://cdn-assets.unis-on-air.com" crossorigin />
+    <link rel="preconnect" href="https://uniair-api.kosa3.com" crossorigin />
+    <link rel="stylesheet" href="/static/styles.css?v=20260303_104" />
   </head>
   <body>
     <div class="bg-orb orb-a"></div>
@@ -89,12 +91,32 @@
                   <select id="profileSelect"></select>
                 </label>
                 <div class="profile-actions">
-                  <button id="loadProfileBtn" class="btn-sub" type="button">读取账号</button>
-                  <button id="openProfileBuilderBtn" class="btn-sub" type="button">新建账号</button>
-                  <button id="saveProfileBtn" class="btn-sub" type="button">保存账号</button>
-                  <button id="deleteProfileBtn" class="btn-sub danger" type="button">删除账号</button>
+                  <button id="toggleProfileAutoSaveBtn" class="btn-sub btn-ops-shape" type="button">自动保存：开</button>
+                  <div id="profileActionDrawer" class="profile-action-drawer">
+                    <button
+                      id="profileActionDrawerToggle"
+                      class="btn-sub profile-action-drawer-toggle"
+                      type="button"
+                      aria-expanded="false"
+                      aria-haspopup="menu"
+                    >
+                      <span class="drawer-label">账号操作</span>
+                      <span class="drawer-caret-box">
+                        <span class="drawer-caret" aria-hidden="true">⌄</span>
+                      </span>
+                    </button>
+                    <div id="profileActionDrawerMenu" class="profile-action-drawer-menu hidden" role="menu">
+                      <button id="openProfileBuilderBtn" class="btn-sub" type="button" role="menuitem">新建账号</button>
+                      <button id="saveProfileBtn" class="btn-sub" type="button" role="menuitem">保存账号</button>
+                      <button id="showProfileBackupsBtn" class="btn-sub" type="button" role="menuitem">账号备份</button>
+                      <button id="exportProfilesBtn" class="btn-sub" type="button" role="menuitem">导出资料</button>
+                      <button id="importProfilesBtn" class="btn-sub" type="button" role="menuitem">导入资料</button>
+                      <button id="deleteProfileBtn" class="btn-sub danger" type="button" role="menuitem">删除账号</button>
+                    </div>
+                  </div>
                 </div>
               </div>
+              <input id="importProfilesFileInput" class="hidden" type="file" accept="application/json,.json" />
               <p id="profileHint" class="card-meta">未选择账号配置；当前使用页面参数。</p>
 
               <div class="options-grid top-settings-grid">
@@ -153,9 +175,24 @@
                   </select>
                 </label>
                 <div class="opt-inline-actions">
-                  <button id="resetFiltersQuick" class="btn-sub" type="button">一键重置筛选</button>
-                  <button id="runOptimizeQuickBtn" class="btn-sub" type="button">一键全卡池Top5</button>
-                  <button id="runOptimizeBtn" class="btn-main" type="button">最优配队</button>
+                  <button id="resetFiltersQuick" class="btn-sub btn-ops-shape" type="button">一键重置筛选</button>
+                  <button
+                    id="runOptimizeQuickBtn"
+                    class="btn-sub btn-ops-shape has-tooltip"
+                    type="button"
+                    data-tip="快捷模式：自动切到全卡池与 Top5，清空队长候选和必带，并按当前排序（默认 +2σ）快速计算。"
+                  >
+                    一键配队
+                  </button>
+                  <button
+                    id="runOptimizeBtn"
+                    class="btn-main btn-ops-shape has-tooltip"
+                    type="button"
+                    data-tip="精确模式：按当前候选卡池、队长候选、必带与试行回数做完整优化，结果按当前排序（如 +2σ）输出。"
+                  >
+                    精确配队
+                  </button>
+                  <button id="optCancelBtn" class="btn-sub btn-ops-shape btn-ops-shape-warn" type="button" disabled>取消优化</button>
                 </div>
               </div>
               <p id="optSummary" class="card-meta">队长候选: 自动 | 必带: 0 | 账号: 默认 | 卡池: 仅持有</p>
@@ -224,6 +261,20 @@
         </div>
         <div class="modal-actions">
           <button id="saveProfileBuilderBtn" class="btn-main" type="button">保存新账号</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileBackupsModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-profile-backups-modal></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>账号备份记录</h3>
+          <button id="closeProfileBackupsBtn" class="btn-sub tiny" type="button">关闭</button>
+        </div>
+        <div class="modal-main">
+          <p id="profileBackupsHint" class="card-meta">读取中...</p>
+          <div id="profileBackupsList" class="profile-backups-list"></div>
         </div>
       </div>
     </div>
@@ -353,6 +404,6 @@
       <span class="back-to-top-text">顶部</span>
     </button>
 
-    <script src="/static/app.js?v=20260302_77"></script>
+    <script src="/static/app.js?v=20260303_105"></script>
   </body>
 </html>

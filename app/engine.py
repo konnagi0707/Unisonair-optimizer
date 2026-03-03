@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
 import math
@@ -8,7 +9,7 @@ import re
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -49,6 +50,7 @@ _CDN_ASSET_BASE_TEMPLATE = "https://cdn-assets.unis-on-air.com/client_assets/{ve
 ICON_CACHE_DIR = ROOT / "app" / "data" / "card_icons"
 ICON_FETCH_TIMEOUT_SEC = 20
 ICON_CACHE_REV = "20260302b"
+OPT_CACHE_MAX_ENTRIES = 96
 
 # Common zawa tuple -> expected% anchors used by players for T1/T2 judgement.
 # These are used for display only (not the simulator core), to show downgraded
@@ -1005,7 +1007,8 @@ class ScoringEngine:
         self._default_member_points_norm: dict[str, int] = {}
         self._default_member_points_ui: dict[str, int] = {}
         self._meta: dict[str, Any] = {}
-        self._opt_cache: dict[str, dict[str, Any]] = {}
+        self._opt_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._opt_cache_lock = threading.Lock()
         self._icon_cache_dir = ICON_CACHE_DIR
         self._icon_lock_guard = threading.Lock()
         self._icon_locks: dict[str, threading.Lock] = {}
@@ -1063,11 +1066,12 @@ class ScoringEngine:
         fallback = str(self._card_icon_fallback_url.get(code) or "").strip()
         if not fallback:
             return None
-        fallback_out = self._icon_cache_dir / f"{code}.fallback.{ICON_CACHE_REV}.png"
+        fallback_key = hashlib.sha1(fallback.encode("utf-8")).hexdigest()[:10]
+        fallback_out = self._icon_cache_dir / f"{code}.fallback.{fallback_key}.{ICON_CACHE_REV}.png"
         if fallback_out.exists() and fallback_out.stat().st_size > 0:
             return fallback_out
 
-        lock = self._get_icon_lock(f"{code}.fallback")
+        lock = self._get_icon_lock(f"{code}.fallback.{fallback_key}")
         with lock:
             if fallback_out.exists() and fallback_out.stat().st_size > 0:
                 return fallback_out
@@ -1457,12 +1461,29 @@ class ScoringEngine:
     def optimize(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_loaded()
         t0 = time.perf_counter()
-        cache_key = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        cached = self._opt_cache.get(cache_key)
+        control_hook = payload.get("_opt_control_hook")
+
+        def _control_tick() -> None:
+            if callable(control_hook):
+                control_hook()
+
+        cache_payload = {
+            k: v
+            for k, v in payload.items()
+            if not str(k).startswith("_opt_")
+        }
+        cache_key = json.dumps(cache_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        cached: dict[str, Any] | None = None
+        with self._opt_cache_lock:
+            cached = self._opt_cache.get(cache_key)
+            if cached is not None:
+                self._opt_cache.move_to_end(cache_key)
         if cached is not None:
             out = copy.deepcopy(cached)
             out.setdefault("meta", {})["cache_hit"] = True
             return out
+
+        _control_tick()
 
         mode = str(payload.get("mode", "single")).strip().lower()
         if mode != "single":
@@ -1655,6 +1676,7 @@ class ScoringEngine:
         t_build_start = time.perf_counter()
         exact_must_mode = bool(must_include_set and len(must_include_set) >= 4)
         for center in center_cards:
+            _control_tick()
             if exact_must_mode:
                 _enumerate_must_candidates(center)
                 continue
@@ -1788,6 +1810,7 @@ class ScoringEngine:
         teams: list[dict[str, Any]] = []
         t_eval_start = time.perf_counter()
         for rank_idx, candidate in enumerate(pre_candidates, start=1):
+            _control_tick()
             row = _evaluate_row(rank_idx, candidate, trials_fast)
             if row is not None:
                 teams.append(row)
@@ -1808,6 +1831,7 @@ class ScoringEngine:
             refined_count_actual = int(refine_count)
             refined: list[dict[str, Any]] = []
             for row in teams[:refine_count]:
+                _control_tick()
                 candidate = {
                     "objective": row["objective"],
                     "team_codes": row["team_codes"],
@@ -1876,11 +1900,12 @@ class ScoringEngine:
             },
             "teams": teams,
         }
-        # Tiny in-memory cache for repeated same optimize requests from UI.
-        if len(self._opt_cache) >= 24:
-            first_key = next(iter(self._opt_cache.keys()))
-            self._opt_cache.pop(first_key, None)
-        self._opt_cache[cache_key] = copy.deepcopy(out)
+        # Thread-safe LRU cache for repeated optimize requests from UI.
+        with self._opt_cache_lock:
+            self._opt_cache[cache_key] = copy.deepcopy(out)
+            self._opt_cache.move_to_end(cache_key)
+            while len(self._opt_cache) > OPT_CACHE_MAX_ENTRIES:
+                self._opt_cache.popitem(last=False)
         return out
 
     def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:

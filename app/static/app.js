@@ -1,5 +1,6 @@
 const state = {
   cards: [],
+  cardsByCode: new Map(),
   songs: [],
   defaults: null,
   slots: [null, null, null, null, null],
@@ -22,10 +23,16 @@ const state = {
   optimizeProgressTimer: null,
   optimizePollTimer: null,
   currentOptimizeJobId: "",
+  optimizeJobStatus: "",
+  optimizeStarting: false,
+  optimizeCancelBusy: false,
   lastOptimizeData: null,
   lastOptimizePayload: null,
+  profileBackups: [],
+  profileBackupsName: "",
   profiles: {},
   activeProfile: "",
+  profileAutoSaveEnabled: true,
   defaultMemberPoint: 15000,
   excludedFilterText: "",
   excludedFilterColors: new Set(),
@@ -36,10 +43,10 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 let workspaceSyncTimer = null;
-let excludeProfileSyncTimer = null;
-let excludeProfileSyncInFlight = false;
-let excludeProfileSyncPending = false;
-let excludeProfileSyncTarget = "";
+let profileAutoSaveTimer = null;
+let profileAutoSaveInFlight = false;
+let profileAutoSavePending = false;
+let profileAutoSaveTarget = "";
 let teamReplaceCalcToken = 0;
 
 function colorClass(color) {
@@ -96,6 +103,7 @@ const UI_STATE_VERSION = 1;
 const RESULT_STATE_VERSION = 2;
 let persistUiStateTimer = null;
 let isApplyingPersistedUiState = false;
+let renderCardListRaf = null;
 
 function toUniqueStringArray(input) {
   if (!Array.isArray(input)) return [];
@@ -160,6 +168,7 @@ function buildUiStateSnapshot() {
     version: UI_STATE_VERSION,
     saved_at: new Date().toISOString(),
     activeProfile: String(state.activeProfile || ""),
+    profileAutoSaveEnabled: Boolean(state.profileAutoSaveEnabled),
     profileSelectValue: $("profileSelect")?.value || "",
     mode: $("mode")?.value || "single",
     songKey: $("songKey")?.value || "",
@@ -284,20 +293,35 @@ function applyPersistedUiState(snapshot) {
 
   isApplyingPersistedUiState = true;
   try {
+    if (typeof snapshot.profileAutoSaveEnabled === "boolean") {
+      state.profileAutoSaveEnabled = Boolean(snapshot.profileAutoSaveEnabled);
+    }
+    let loadedProfileName = "";
     const profileName = String(snapshot.activeProfile || "").trim();
-    const hasProfileLoaded = Boolean(profileName && state.profiles[profileName]);
-    if (hasProfileLoaded) {
-      applyProfile(profileName, false);
+    if (profileName && state.profiles[profileName]) {
+      const ok = applyProfile(profileName, false);
       const profileSelect = $("profileSelect");
-      if (profileSelect) profileSelect.value = profileName;
-    } else {
+      if (ok) loadedProfileName = profileName;
+      if (profileSelect) profileSelect.value = ok ? profileName : "";
+    }
+    if (!loadedProfileName) {
       const profileSelect = $("profileSelect");
       const selectedValue = String(snapshot.profileSelectValue || "").trim();
       if (profileSelect && selectedValue && state.profiles[selectedValue]) {
-        profileSelect.value = selectedValue;
-        setProfileHint(`已选择账号「${selectedValue}」，点击“读取账号”应用成员分。`);
+        const ok = applyProfile(selectedValue, false);
+        if (ok) {
+          loadedProfileName = selectedValue;
+          profileSelect.value = selectedValue;
+        }
       }
     }
+    if (!loadedProfileName) {
+      const fallbackLoaded = String(state.activeProfile || "").trim();
+      if (fallbackLoaded && state.profiles[fallbackLoaded]) {
+        loadedProfileName = fallbackLoaded;
+      }
+    }
+    const hasProfileLoaded = Boolean(loadedProfileName);
 
     const modeEl = $("mode");
     if (modeEl) {
@@ -332,10 +356,12 @@ function applyPersistedUiState(snapshot) {
       if (cardListScopeEl) cardListScopeEl.value = cardListScope;
     }
 
-    const groupPower = parseInt(String(snapshot.groupPower || ""), 10);
-    if (Number.isFinite(groupPower) && groupPower > 0) {
-      const groupPowerEl = $("groupPower");
-      if (groupPowerEl) groupPowerEl.value = String(groupPower);
+    if (!hasProfileLoaded) {
+      const groupPower = parseInt(String(snapshot.groupPower || ""), 10);
+      if (Number.isFinite(groupPower) && groupPower > 0) {
+        const groupPowerEl = $("groupPower");
+        if (groupPowerEl) groupPowerEl.value = String(groupPower);
+      }
     }
     const trials = parseInt(String(snapshot.trials || ""), 10);
     if (Number.isFinite(trials) && trials >= 100) {
@@ -518,7 +544,7 @@ function applyDefaultBaseline(refreshUI = true) {
     refreshPoolSummary();
     refreshResultExcludeBadges();
   }
-  setProfileHint("公平配置：未读取账号。候选卡池=仅持有（初始0张），请先勾选自己的持有卡或读取账号。");
+  setProfileHint("公平配置：未使用账号。候选卡池=仅持有（初始0张），请先勾选自己的持有卡或在下拉菜单选择账号。");
   schedulePersistUiState();
 }
 
@@ -552,8 +578,16 @@ function getSceneCardTotal(card) {
 }
 
 function buildProfileSnapshot() {
+  const currentGroupRaw = parseInt(String($("groupPower")?.value || ""), 10);
+  const activeProfileGroup = state.activeProfile && state.profiles[state.activeProfile]
+    ? parseInt(String(state.profiles[state.activeProfile].group_power || 0), 10) || 0
+    : 0;
+  const defaultGroup = parseInt(String(state.defaults?.group_power || 1800000), 10) || 1800000;
+  const groupPower = Number.isFinite(currentGroupRaw) && currentGroupRaw > 0
+    ? currentGroupRaw
+    : (activeProfileGroup > 0 ? activeProfileGroup : defaultGroup);
   return {
-    group_power: parseInt($("groupPower").value, 10) || 1800000,
+    group_power: groupPower,
     member_points: getMemberPointsPayload(),
     owned_codes: [...state.ownedCodes],
     exclude_codes: [],
@@ -687,67 +721,234 @@ async function saveProfileToServer(name, snapshot) {
   };
 }
 
+async function fetchProfileBackupsFromServer(name, limit = 30) {
+  const key = String(name || "").trim();
+  if (!key) throw new Error("账号名不能为空");
+  const resp = await fetch(`/api/profiles/${encodeURIComponent(key)}/backups?limit=${Math.max(1, Math.min(80, limit))}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.detail || "读取备份失败");
+  return Array.isArray(data?.backups) ? data.backups : [];
+}
+
+async function deleteProfileBackupFromServer(name, backupFile) {
+  const key = String(name || "").trim();
+  const file = String(backupFile || "").trim();
+  if (!key) throw new Error("账号名不能为空");
+  if (!file) throw new Error("备份文件不能为空");
+  const resp = await fetch(
+    `/api/profiles/${encodeURIComponent(key)}/backups/${encodeURIComponent(file)}`,
+    { method: "DELETE" }
+  );
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.detail || "删除备份失败");
+  return data;
+}
+
+async function undoProfileFromServer(name, backupFile = "") {
+  const key = String(name || "").trim();
+  if (!key) throw new Error("账号名不能为空");
+  const payload = {};
+  const file = String(backupFile || "").trim();
+  if (file) payload.backup_file = file;
+  const resp = await fetch(`/api/profiles/${encodeURIComponent(key)}/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.detail || "撤回失败");
+  return data;
+}
+
+async function exportProfilesFromServer(name = "") {
+  const key = String(name || "").trim();
+  const query = key ? `?name=${encodeURIComponent(key)}` : "";
+  const resp = await fetch(`/api/profiles/export${query}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.detail || "导出失败");
+  return data;
+}
+
+async function importProfilesToServer(payload) {
+  const resp = await fetch("/api/profiles/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.detail || "导入失败");
+  return data;
+}
+
+function normalizeDownloadFilePart(input, fallback = "profiles") {
+  const text = String(input || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return text || fallback;
+}
+
+function makeTimestampTag() {
+  const now = new Date();
+  const pad = (v) => String(v).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function downloadJsonAsFile(fileName, data) {
+  const content = `${JSON.stringify(data, null, 2)}\n`;
+  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function isExcludedModalOpen() {
   const modal = $("excludedModal");
   return Boolean(modal && !modal.classList.contains("hidden"));
 }
 
-function buildExcludeSyncSnapshotForProfile(name) {
+function canonicalizeProfileSnapshot(profile) {
+  const normalized = normalizeProfileForDiff(profile || {});
+  const memberPoints = {};
+  Object.keys(normalized.member_points)
+    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+    .forEach((k) => {
+      memberPoints[k] = Math.max(0, parseInt(String(normalized.member_points[k]), 10) || 0);
+    });
+  return {
+    group_power: Math.max(0, parseInt(String(normalized.group_power || 0), 10) || 0),
+    member_points: memberPoints,
+    owned_codes: toUniqueStringArray(normalized.owned_codes || []).sort((a, b) => a.localeCompare(b, "ja")),
+  };
+}
+
+function isProfileSnapshotSame(a, b) {
+  const left = canonicalizeProfileSnapshot(a);
+  const right = canonicalizeProfileSnapshot(b);
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function buildAutoSaveSnapshotForProfile(name) {
   const profile = state.profiles[name];
   if (!profile) return null;
   const cardCodeSet = new Set(state.cards.map((c) => String(c.code || "").trim()).filter(Boolean));
-  const ownedCodes = [...state.ownedCodes].filter((code) => cardCodeSet.has(code));
+  const source = buildProfileSnapshot();
   return {
-    group_power: parseInt(String(profile.group_power || 1800000), 10) || 1800000,
-    member_points: sanitizeMemberPointsMap(profile.member_points || {}),
-    owned_codes: ownedCodes,
+    group_power: parseInt(String(source.group_power || profile.group_power || 1800000), 10) || 1800000,
+    member_points: sanitizeMemberPointsMap(source.member_points || {}),
+    owned_codes: toUniqueStringArray(source.owned_codes || []).filter((code) => cardCodeSet.has(code)),
     exclude_codes: [],
   };
 }
 
-async function flushActiveProfileExcludeSync() {
-  const name = String(excludeProfileSyncTarget || state.activeProfile || "").trim();
-  if (!name || !state.profiles[name]) return;
-  if (excludeProfileSyncInFlight) {
-    excludeProfileSyncPending = true;
+function updateProfileAutoSaveButton() {
+  const btn = $("toggleProfileAutoSaveBtn");
+  if (!btn) return;
+  const on = Boolean(state.profileAutoSaveEnabled);
+  btn.textContent = on ? "自动保存：开" : "自动保存：关";
+  btn.classList.toggle("off", !on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+}
+
+function setProfileActionDrawerOpen(open) {
+  const drawer = $("profileActionDrawer");
+  const toggle = $("profileActionDrawerToggle");
+  const menu = $("profileActionDrawerMenu");
+  if (!drawer || !toggle || !menu) return;
+  const on = Boolean(open);
+  drawer.classList.toggle("open", on);
+  toggle.setAttribute("aria-expanded", on ? "true" : "false");
+  menu.classList.toggle("hidden", !on);
+}
+
+function closeProfileActionDrawer() {
+  setProfileActionDrawerOpen(false);
+}
+
+function clearActiveProfileAutoSaveTimer() {
+  if (!profileAutoSaveTimer) return;
+  window.clearTimeout(profileAutoSaveTimer);
+  profileAutoSaveTimer = null;
+}
+
+async function flushActiveProfileAutoSave() {
+  const name = String(profileAutoSaveTarget || state.activeProfile || "").trim();
+  if (!name || !state.profiles[name] || !state.profileAutoSaveEnabled) return;
+  if (profileAutoSaveInFlight) {
+    profileAutoSavePending = true;
     return;
   }
-  const snapshot = buildExcludeSyncSnapshotForProfile(name);
+  const snapshot = buildAutoSaveSnapshotForProfile(name);
   if (!snapshot) return;
-  excludeProfileSyncInFlight = true;
+  if (isProfileSnapshotSame(snapshot, state.profiles[name])) {
+    if (profileAutoSaveTarget === name) profileAutoSaveTarget = "";
+    return;
+  }
+  profileAutoSaveInFlight = true;
   try {
     const saved = await saveProfileToServer(name, snapshot);
     state.profiles[name] = saved;
     if (state.activeProfile === name) {
-      setProfileHint(
-        `账号「${name}」持有卡池已自动同步（${snapshot.owned_codes.length} 张）。`
-      );
+      setProfileHint(`账号「${name}」已自动保存。`);
     }
+    schedulePersistUiState();
   } catch (err) {
     if (state.activeProfile === name) {
-      setProfileHint(`账号「${name}」卡池自动同步失败：${err?.message || err}`);
+      setProfileHint(`账号「${name}」自动保存失败：${err?.message || err}`);
     }
   } finally {
-    excludeProfileSyncInFlight = false;
-    if (excludeProfileSyncPending) {
-      excludeProfileSyncPending = false;
-      void flushActiveProfileExcludeSync();
-    } else if (excludeProfileSyncTarget === name) {
-      excludeProfileSyncTarget = "";
+    profileAutoSaveInFlight = false;
+    if (profileAutoSavePending) {
+      profileAutoSavePending = false;
+      void flushActiveProfileAutoSave();
+    } else if (profileAutoSaveTarget === name) {
+      profileAutoSaveTarget = "";
     }
   }
 }
 
-function scheduleActiveProfileExcludeSync() {
+function scheduleActiveProfileAutoSave(reason = "") {
   const profileName = String(state.activeProfile || "").trim();
   if (!profileName || !state.profiles[profileName]) return;
-  excludeProfileSyncTarget = profileName;
-  setProfileHint(`账号「${profileName}」持有卡池已更新，正在自动同步...`);
-  if (excludeProfileSyncTimer) window.clearTimeout(excludeProfileSyncTimer);
-  excludeProfileSyncTimer = window.setTimeout(() => {
-    excludeProfileSyncTimer = null;
-    void flushActiveProfileExcludeSync();
-  }, 260);
+  if (!state.profileAutoSaveEnabled) {
+    if (reason) {
+      setProfileHint(`账号「${profileName}」${reason}，自动保存已关闭，请点击“保存账号”。`);
+    }
+    return;
+  }
+  profileAutoSaveTarget = profileName;
+  clearActiveProfileAutoSaveTimer();
+  profileAutoSaveTimer = window.setTimeout(() => {
+    profileAutoSaveTimer = null;
+    void flushActiveProfileAutoSave();
+  }, 420);
+}
+
+function setProfileAutoSaveEnabled(on) {
+  const next = Boolean(on);
+  state.profileAutoSaveEnabled = next;
+  updateProfileAutoSaveButton();
+  if (!next) {
+    clearActiveProfileAutoSaveTimer();
+    const profileName = String(state.activeProfile || "").trim();
+    if (profileName) {
+      setProfileHint(`账号「${profileName}」已关闭自动保存，请记得点击“保存账号”。`);
+    }
+  } else {
+    const profileName = String(state.activeProfile || "").trim();
+    if (profileName) {
+      setProfileHint(`账号「${profileName}」已开启自动保存。`);
+      scheduleActiveProfileAutoSave("当前修改");
+    }
+  }
+  schedulePersistUiState();
 }
 
 async function deleteProfileFromServer(name) {
@@ -773,6 +974,20 @@ function renderProfileOptions() {
 function setProfileHint(text) {
   const el = $("profileHint");
   if (el) el.textContent = text;
+}
+
+function getSelectedProfileName() {
+  return String($("profileSelect")?.value || state.activeProfile || "").trim();
+}
+
+function cloneProfileSnapshot(profile) {
+  if (!profile || typeof profile !== "object") return null;
+  return {
+    group_power: parseInt(String(profile.group_power || 0), 10) || 0,
+    member_points: sanitizeMemberPointsMap(profile.member_points || {}),
+    owned_codes: toUniqueStringArray(profile.owned_codes || []),
+    exclude_codes: toUniqueStringArray(profile.exclude_codes || []),
+  };
 }
 
 function applyProfile(name, refreshUI = true) {
@@ -826,7 +1041,7 @@ function saveProfile(name) {
 
 async function saveCurrentToExistingProfile(name) {
   const key = saveProfile(name);
-  const beforeProfile = state.profiles[key] ? JSON.parse(JSON.stringify(state.profiles[key])) : null;
+  const beforeProfile = cloneProfileSnapshot(state.profiles[key]);
   const saved = await saveProfileToServer(key, buildProfileSnapshot());
   state.profiles[key] = saved;
   renderProfileOptions();
@@ -848,6 +1063,130 @@ async function deleteProfile(name) {
   schedulePersistUiState();
 }
 
+async function reloadProfilesFromServer(preferredName = "") {
+  const targetName = String(preferredName || "").trim();
+  const previousActive = String(state.activeProfile || "").trim();
+  state.profiles = await fetchProfilesFromServer();
+  renderProfileOptions();
+
+  if (targetName && state.profiles[targetName]) {
+    applyProfile(targetName);
+    $("profileSelect").value = targetName;
+    return targetName;
+  }
+  if (previousActive && state.profiles[previousActive]) {
+    applyProfile(previousActive);
+    $("profileSelect").value = previousActive;
+    return previousActive;
+  }
+  const names = Object.keys(state.profiles).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  if (names.length > 0) {
+    const first = names[0];
+    applyProfile(first);
+    $("profileSelect").value = first;
+    return first;
+  }
+  applyDefaultBaseline();
+  $("profileSelect").value = "";
+  return "";
+}
+
+function formatBackupTimeLabel(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "-";
+  const compact = text.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+  if (compact) {
+    const [, y, m, d, hh, mm, ss] = compact;
+    return `${y}/${Number(m)}/${Number(d)} ${hh}:${mm}:${ss}`;
+  }
+  const dt = new Date(text);
+  if (!Number.isFinite(dt.getTime())) return text;
+  return dt.toLocaleString("zh-CN", { hour12: false });
+}
+
+function closeProfileBackupsModal() {
+  const modal = $("profileBackupsModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function renderProfileBackupsModal(name, backups) {
+  const hint = $("profileBackupsHint");
+  const list = $("profileBackupsList");
+  if (!hint || !list) return;
+  const rows = Array.isArray(backups) ? backups : [];
+  state.profileBackups = rows;
+  state.profileBackupsName = String(name || "").trim();
+  if (!rows.length) {
+    hint.textContent = `账号「${name}」暂无可用备份。`;
+    list.innerHTML = `<div class="card-meta">当前没有备份记录。</div>`;
+    return;
+  }
+  hint.textContent = `账号「${name}」共有 ${rows.length} 条备份记录。`;
+  list.innerHTML = rows
+    .map((row) => {
+      const file = String(row?.backup_file || "").trim();
+      const backupCreated = formatBackupTimeLabel(row?.backup_created_at || "");
+      const profileSavedAt = formatBackupTimeLabel(row?.profile_saved_at || "");
+      const groupPower = nfmt(Number(row?.group_power || 0));
+      const memberCount = Number(row?.member_point_count || 0);
+      const ownedCount = Number(row?.owned_count || 0);
+      return `
+        <article class="profile-backup-item">
+          <div class="profile-backup-main">
+            <div class="profile-backup-title">备份时间: ${escHtml(backupCreated)}</div>
+            <div class="profile-backup-meta">账号快照时间: ${escHtml(profileSavedAt)}</div>
+            <div class="profile-backup-meta">group ${groupPower} | 成员分 ${memberCount} 人 | 持有 ${ownedCount} 张</div>
+          </div>
+          <div class="profile-backup-actions">
+            <button type="button" class="btn-sub tiny" data-restore-profile-backup="${escHtml(file)}">恢复到此备份</button>
+            <button type="button" class="btn-sub tiny danger" data-delete-profile-backup="${escHtml(file)}">删除备份</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function openProfileBackupsModal() {
+  const key = getSelectedProfileName();
+  if (!key || !state.profiles[key]) {
+    setProfileHint("请先选择账号。");
+    return;
+  }
+  const modal = $("profileBackupsModal");
+  if (!modal) return;
+  const hint = $("profileBackupsHint");
+  const list = $("profileBackupsList");
+  if (hint) hint.textContent = "读取中...";
+  if (list) list.innerHTML = "";
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  try {
+    const backups = await fetchProfileBackupsFromServer(key, 40);
+    renderProfileBackupsModal(key, backups);
+  } catch (err) {
+    if (hint) hint.textContent = `读取失败：${err?.message || err}`;
+    if (list) list.innerHTML = "";
+  }
+}
+
+async function restoreProfileByBackup(name, backupFile = "") {
+  const key = String(name || "").trim();
+  if (!key || !state.profiles[key]) throw new Error("账号不存在");
+  const data = await undoProfileFromServer(key, backupFile);
+  const restored = data?.profile || null;
+  if (!restored || typeof restored !== "object") throw new Error("恢复结果无效");
+  state.profiles[key] = restored;
+  renderProfileOptions();
+  applyProfile(key);
+  $("profileSelect").value = key;
+  scheduleWorkspacePanelHeightSync();
+  setProfileHint(`已恢复账号「${key}」到备份。`);
+  schedulePersistUiState();
+}
+
 function makeSongLabel(song) {
   const colorCode = String(song?.color || "").toUpperCase();
   const colorLabel = COLOR_FULL_LABEL[colorCode] || colorCode || "All";
@@ -862,7 +1201,52 @@ function parseAxes(raw) {
 }
 
 function getCardByCode(code) {
-  return state.cards.find((c) => c.code === code) || null;
+  const key = String(code || "").trim();
+  if (!key) return null;
+  return state.cardsByCode.get(key) || null;
+}
+
+function buildCardSearchBlob(card) {
+  return [
+    card?.code,
+    card?.member_name,
+    card?.member_name_roman || "",
+    card?.member_name_kana || "",
+    card?.title,
+    card?.color,
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function computeCardSeriesTags(card) {
+  const tags = Array.isArray(card?.tags) ? card.tags : [];
+  const list = tags.filter((t) => t && t !== "V/S");
+  const titleRaw = String(card?.title || "");
+  const isPreciousPair = /precious\s*-\s*pair/i.test(titleRaw);
+  const isPreciousPair23 = /precious\s*-\s*pair\s*-\s*'?23/i.test(titleRaw);
+  if (isPreciousPair) {
+    list.push(PRECIOUS_PAIR_SERIES_TAG);
+  }
+  if (isPreciousPair23) {
+    list.push(PRECIOUS_PAIR_23_SERIES_TAG);
+  }
+  return [...new Set(list)];
+}
+
+function prepareCardForUi(cardLike) {
+  if (!cardLike || typeof cardLike !== "object") return cardLike;
+  cardLike._search_blob = buildCardSearchBlob(cardLike);
+  cardLike._series_tags_cached = computeCardSeriesTags(cardLike);
+  return cardLike;
+}
+
+function scheduleRenderCardList() {
+  if (renderCardListRaf) window.cancelAnimationFrame(renderCardListRaf);
+  renderCardListRaf = window.requestAnimationFrame(() => {
+    renderCardListRaf = null;
+    renderCardList();
+  });
 }
 
 function escHtml(text) {
@@ -951,18 +1335,36 @@ function numOrDash(v, digits = 2) {
   return Number.isFinite(n) ? n.toFixed(digits) : "-";
 }
 
+function parseSkillBucketSValue(bucketLike) {
+  const bucket = String(bucketLike || "").trim();
+  if (!bucket) return null;
+  const sMatch = bucket.match(/^(\d+(?:\.\d+)?)s$/i);
+  if (sMatch) return Number(sMatch[1]);
+  const parenMatch = bucket.match(/^(\d+(?:\.\d+)?)%?\(s\)$/i);
+  if (parenMatch) return Number(parenMatch[1]);
+  return null;
+}
+
+function formatSkillBucketChipLabel(bucketLike) {
+  const sValue = parseSkillBucketSValue(bucketLike);
+  if (Number.isFinite(sValue)) return `${sValue.toFixed(2)}%(S)`;
+  const n = Number(bucketLike);
+  return Number.isFinite(n) ? n.toFixed(2) : String(bucketLike || "");
+}
+
 function getSkillExpectedLabel(cardLike) {
   const card = cardLike || {};
   const bucket = String(card.skill_bucket || "").trim();
   if (bucket) {
-    if (/s$/i.test(bucket)) return bucket;
+    const sValue = parseSkillBucketSValue(bucket);
+    if (Number.isFinite(sValue)) return `${sValue.toFixed(2)}%(S)`;
     const n = Number(bucket);
     return Number.isFinite(n) ? `${n.toFixed(2)}%` : bucket;
   }
   const tuple = String(card.skill_front_tuple || card.front_tuple_base || card.front_tuple || "").trim();
   const numeric = numOrDash(card.skill_expected, 2);
   if (numeric === "-") return "-";
-  if (tuple === "8-16.0-7-30.0-0.0") return `${numeric}s`;
+  if (tuple === "8-16.0-7-30.0-0.0") return `${numeric}%(S)`;
   return `${numeric}%`;
 }
 
@@ -1015,18 +1417,21 @@ function cardAvatarHTML(card, size = "md") {
   const color = colorClass(card.color);
   const alt = escHtml(`${card.member_name}[${card.title}]`);
   const fallbackText = "无图";
-  const iconPrimary = String(card.icon_url || "").trim();
-  const iconFallbacks = [String(card.icon_catalog_url || "").trim(), String(card.icon_fallback_url || "").trim()]
-    .filter(Boolean)
-    .filter((x, i, arr) => arr.indexOf(x) === i && x !== iconPrimary);
-  const iconSrc = iconPrimary || iconFallbacks[0] || "";
-  const iconBackup = iconPrimary && iconFallbacks.length ? iconFallbacks[0] : "";
+  const iconApi = String(card.icon_url || "").trim();
+  const iconCatalog = String(card.icon_catalog_url || "").trim();
+  const iconFallback = String(card.icon_fallback_url || "").trim();
+  // `icon_catalog_url` may point to bundle bytes; prefer browser-displayable fallback URL first.
+  const iconCandidates = [iconFallback, iconApi, iconCatalog].filter(Boolean).filter((x, i, arr) => arr.indexOf(x) === i);
+  const iconSrc = iconCandidates[0] || "";
+  const iconBackup = iconCandidates[1] || "";
+  const loadingMode = size === "lg" ? "auto" : "eager";
+  const fetchPriority = size === "sm" ? "high" : "auto";
   if (!iconSrc) {
     return `<span class="card-avatar ${size} fallback ${color}" title="icon unavailable"><span class="fallback-label">${fallbackText}</span></span>`;
   }
   return `
     <span class="card-avatar ${size} ${color}">
-      <img src="${escHtml(iconSrc)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer" data-fallback-src="${escHtml(iconBackup)}"
+      <img src="${escHtml(iconSrc)}" alt="${alt}" loading="${loadingMode}" decoding="async" fetchpriority="${fetchPriority}" referrerpolicy="no-referrer" data-fallback-src="${escHtml(iconBackup)}"
         onerror="if(!this.dataset.fallbackTried&&this.dataset.fallbackSrc){this.dataset.fallbackTried='1';this.src=this.dataset.fallbackSrc;return;} this.parentElement.classList.add('fallback'); this.remove();" />
       <span class="fallback-label">${fallbackText}</span>
     </span>
@@ -1049,7 +1454,9 @@ function setOwned(code, on) {
     state.mustIncludeCodes.delete(code);
   }
   const changed = prevOwned !== state.ownedCodes.has(code);
-  if (changed) scheduleActiveProfileExcludeSync();
+  if (changed && state.activeProfile) {
+    scheduleActiveProfileAutoSave("持有卡池已修改");
+  }
   schedulePersistUiState();
 }
 
@@ -1082,18 +1489,11 @@ function syncOwnedPoolVisibility() {
 }
 
 function getCardSeriesTags(card) {
-  const tags = Array.isArray(card?.tags) ? card.tags : [];
-  const list = tags.filter((t) => t && t !== "V/S");
-  const titleRaw = String(card?.title || "");
-  const isPreciousPair = /precious\s*-\s*pair/i.test(titleRaw);
-  const isPreciousPair23 = /precious\s*-\s*pair\s*-\s*'?23/i.test(titleRaw);
-  if (isPreciousPair) {
-    list.push(PRECIOUS_PAIR_SERIES_TAG);
-  }
-  if (isPreciousPair23) {
-    list.push(PRECIOUS_PAIR_23_SERIES_TAG);
-  }
-  return [...new Set(list)];
+  if (!card || typeof card !== "object") return [];
+  if (Array.isArray(card._series_tags_cached)) return card._series_tags_cached;
+  const tags = computeCardSeriesTags(card);
+  card._series_tags_cached = tags;
+  return tags;
 }
 
 function renderSeriesTags() {
@@ -1582,7 +1982,6 @@ function applyExcludedPoolChange(stateText = "") {
   if (isExcludedModalOpen()) renderExcludedModal();
   if (stateText) $("optState").textContent = stateText;
   schedulePersistUiState();
-  scheduleActiveProfileExcludeSync();
 }
 
 function renderExcludedModal() {
@@ -1665,22 +2064,6 @@ function closeExcludedModal() {
   modal.setAttribute("aria-hidden", "true");
 }
 
-function loadSelectedProfileByMenu() {
-  const sel = $("profileSelect");
-  if (!sel) return;
-  const name = String(sel.value || "").trim();
-  if (!name) {
-    applyDefaultBaseline();
-    return;
-  }
-  if (!state.profiles[name]) {
-    setProfileHint(`读取失败：账号「${name}」不存在。`);
-    return;
-  }
-  applyProfile(name);
-  sel.value = name;
-}
-
 function initSongSelect() {
   const sel = $("songKey");
   const songs = [...state.songs].sort((a, b) => {
@@ -1705,8 +2088,10 @@ function initSkillTagFilter() {
   const root = $("qSkillTags");
   const buckets = [...new Set(state.cards.map((c) => c.skill_bucket).filter(Boolean))];
   buckets.sort((a, b) => {
-    if (a === "3.68s") return -1;
-    if (b === "3.68s") return 1;
+    const aSpecial = Number.isFinite(parseSkillBucketSValue(a));
+    const bSpecial = Number.isFinite(parseSkillBucketSValue(b));
+    if (aSpecial && !bSpecial) return -1;
+    if (!aSpecial && bSpecial) return 1;
     const na = parseFloat(a);
     const nb = parseFloat(b);
     if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na;
@@ -1717,7 +2102,8 @@ function initSkillTagFilter() {
     `<button type="button" class="skill-chip active" data-bucket="__all__">全部</button>` +
     buckets
       .map(
-        (b) => `<button type="button" class="skill-chip" data-bucket="${b}">${b}</button>`
+        (b) =>
+          `<button type="button" class="skill-chip" data-bucket="${escHtml(String(b))}">${escHtml(formatSkillBucketChipLabel(b))}</button>`
       )
       .join("");
 
@@ -1853,7 +2239,7 @@ function renderSlots() {
       state.memberPoints[key] = next;
       state.memberPointOverrides.add(key);
       if (state.activeProfile) {
-        setProfileHint(`账号「${state.activeProfile}」已加载；成员分已被手动修改，可点“保存账号”覆盖。`);
+        scheduleActiveProfileAutoSave("成员分已修改");
       }
     });
   });
@@ -1865,16 +2251,7 @@ function cardMatchesFilter(card) {
   if (listScope === "owned" && !state.ownedCodes.has(card.code)) return false;
 
   if (q) {
-    const hit = [
-      card.code,
-      card.member_name,
-      card.member_name_roman || "",
-      card.member_name_kana || "",
-      card.title,
-      card.color,
-    ]
-      .join(" ")
-      .toLowerCase();
+    const hit = String(card._search_blob || buildCardSearchBlob(card));
     if (!hit.includes(q)) return false;
   }
   if (state.selectedColors.size > 0 && !state.selectedColors.has(card.color)) return false;
@@ -2061,7 +2438,7 @@ function renderCardList() {
         }
       }
       if (state.activeProfile) {
-        setProfileHint(`账号「${state.activeProfile}」已加载；成员分已被手动修改，可点“保存账号”覆盖。`);
+        scheduleActiveProfileAutoSave("成员分已修改");
       }
       renderCardList();
     });
@@ -2080,7 +2457,7 @@ function renderCardList() {
       state.memberPoints[member] = next;
       state.memberPointOverrides.add(member);
       if (state.activeProfile) {
-        setProfileHint(`账号「${state.activeProfile}」已加载；成员分已被手动修改，可点“保存账号”覆盖。`);
+        scheduleActiveProfileAutoSave("成员分已修改");
       }
       renderCardList();
     });
@@ -2232,8 +2609,25 @@ function getOptimizePayload() {
       throw new Error("必带=5时，队长候选里至少要包含1张必带卡，否则无法组成5人队伍。");
     }
   }
-  if ($("mode").value !== "single") throw new Error("最优配队目前仅支持单曲模式，请先把模式切到“单曲”");
-  if (!$("songKey").value) throw new Error("最优配队需要先选择歌曲");
+  if ($("mode").value !== "single") throw new Error("精确配队目前仅支持单曲模式，请先把模式切到“单曲”");
+  if (!$("songKey").value) throw new Error("精确配队需要先选择歌曲");
+  const topN = parseInt($("optTopN").value, 10) || 5;
+  const defaultPreEvalTrials = Number(state.defaults?.optimize?.pre_eval_trials ?? 100);
+  const defaultFinalEvalCount = Number(state.defaults?.optimize?.final_eval_count ?? topN);
+  const ownedPoolCount = scope === "owned" ? ownedCodes.length : 0;
+  const ownedFastTrack =
+    scope === "owned" &&
+    ownedPoolCount >= 60 &&
+    centerCodes.length === 0 &&
+    mustCodes.length === 0;
+  const centerCandidatesPerCenter = ownedFastTrack ? (ownedPoolCount >= 120 ? 10 : 12) : 16;
+  const shortlistSize = ownedFastTrack ? (ownedPoolCount >= 120 ? 30 : 36) : 48;
+  const searchPoolSize = ownedFastTrack ? (ownedPoolCount >= 120 ? 30 : 36) : 48;
+  const preselectAll = !ownedFastTrack;
+  const preselectTopM = preselectAll ? 999999 : Math.max(topN * 20, ownedPoolCount >= 120 ? 140 : 120);
+  const preEvalTrials = ownedFastTrack
+    ? Math.min(defaultPreEvalTrials, ownedPoolCount >= 120 ? 50 : 60)
+    : defaultPreEvalTrials;
   return {
     ...getCommonOptionPayload(),
     mode: "single",
@@ -2242,16 +2636,16 @@ function getOptimizePayload() {
     exclude_card_codes: [],
     center_card_codes: centerCodes,
     must_include_codes: mustCodes,
-    top_n: parseInt($("optTopN").value, 10) || 5,
-    center_candidates_per_center: 16,
-    shortlist_size: 48,
-    search_pool_size: 48,
+    top_n: topN,
+    center_candidates_per_center: centerCandidatesPerCenter,
+    shortlist_size: shortlistSize,
+    search_pool_size: searchPoolSize,
     // strict_no_miss=true (default): disable fast-all pruning to avoid miss.
     disable_fast_all: Boolean(state.defaults?.optimize?.strict_no_miss ?? true),
-    preselect_all: true,
-    preselect_top_m: 999999,
-    pre_eval_trials: Number(state.defaults?.optimize?.pre_eval_trials ?? 100),
-    final_eval_count: Number(state.defaults?.optimize?.final_eval_count ?? (parseInt($("optTopN").value, 10) || 5)),
+    preselect_all: preselectAll,
+    preselect_top_m: preselectTopM,
+    pre_eval_trials: preEvalTrials,
+    final_eval_count: Number.isFinite(defaultFinalEvalCount) ? Math.max(topN, defaultFinalEvalCount) : topN,
     candidate_strategy: state.defaults?.optimize?.candidate_strategy || "axis_t1",
     opt_min_skill_expected: Number(state.defaults?.optimize?.opt_min_skill_expected ?? 3.0),
     include_histogram: false,
@@ -2276,6 +2670,9 @@ function formatOptimizeErrorMessage(raw) {
   }
   if (msg.includes("must_include code not in current pool")) {
     return "必带里有卡不在当前卡池，请检查必带设置。";
+  }
+  if (msg.includes("owned_card_codes must contain at least 5 unique cards")) {
+    return "仅持有卡池至少需要5张不重复卡片，才能进行优化。";
   }
   if (msg.includes("no candidate teams matched current constraints")) {
     return "当前约束下找不到可行队伍。常见原因：必带太多，或必带=5但没有V/S队长卡。";
@@ -2723,11 +3120,34 @@ function setOptimizeButtonsDisabled(disabled) {
   const runOptimizeQuickBtn = $("runOptimizeQuickBtn");
   if (runOptimizeBtn) runOptimizeBtn.disabled = on;
   if (runOptimizeQuickBtn) runOptimizeQuickBtn.disabled = on;
+  updateOptimizeCancelButton();
+}
+
+function setOptimizeJobStatus(status) {
+  state.optimizeJobStatus = String(status || "").trim().toLowerCase();
+  updateOptimizeCancelButton();
+}
+
+function updateOptimizeCancelButton() {
+  const btn = $("optCancelBtn");
+  if (!btn) return;
+  const hasJob = Boolean(state.currentOptimizeJobId);
+  btn.classList.remove("hidden");
+  const status = state.optimizeJobStatus;
+  const canCancel = hasJob && (status === "queued" || status === "running");
+  btn.textContent = "取消优化";
+  btn.disabled = Boolean(state.optimizeCancelBusy || !canCancel);
 }
 
 function setPendingOptimizeJobId(jobId) {
   const key = String(jobId || "").trim();
   state.currentOptimizeJobId = key;
+  state.optimizeStarting = false;
+  if (!key) {
+    state.optimizeJobStatus = "";
+    state.optimizeCancelBusy = false;
+  }
+  updateOptimizeCancelButton();
   try {
     if (key) localStorage.setItem(OPTIMIZE_JOB_STORAGE_KEY, key);
     else localStorage.removeItem(OPTIMIZE_JOB_STORAGE_KEY);
@@ -2751,6 +3171,9 @@ function clearOptimizePollTimer() {
 
 function finishOptimizeJobTracking() {
   clearOptimizePollTimer();
+  state.optimizeStarting = false;
+  state.optimizeCancelBusy = false;
+  setOptimizeJobStatus("");
   setPendingOptimizeJobId("");
   setOptimizeButtonsDisabled(false);
 }
@@ -3482,8 +3905,10 @@ async function pollOptimizeJob(jobId) {
   }
 
   const status = String(data?.status || "").toLowerCase();
+  setOptimizeJobStatus(status);
   if (status === "queued" || status === "running") {
     stateText.textContent = status === "queued" ? "优化任务排队中..." : "优化中...";
+    if (!state.optimizeProgressTimer) startOptimizeProgress();
     state.optimizePollTimer = setTimeout(() => {
       pollOptimizeJob(jobId);
     }, 900);
@@ -3492,12 +3917,23 @@ async function pollOptimizeJob(jobId) {
 
   if (status === "success") {
     applyOptimizeResult(data.result || {});
+    setOptimizeJobStatus("success");
     stateText.textContent = "";
     stopOptimizeProgress(true);
     finishOptimizeJobTracking();
     return;
   }
 
+  if (status === "canceled") {
+    setOptimizeJobStatus("canceled");
+    $("resultHint").textContent = "已取消";
+    stateText.textContent = "优化已取消。";
+    stopOptimizeProgress(false);
+    finishOptimizeJobTracking();
+    return;
+  }
+
+  setOptimizeJobStatus(status || "error");
   const hint = formatOptimizeErrorMessage(data?.error || "优化失败");
   $("resultArea").innerHTML = `<div class="result-card">错误: ${hint}</div>`;
   $("resultHint").textContent = "优化失败";
@@ -3508,6 +3944,8 @@ async function pollOptimizeJob(jobId) {
 
 async function startOptimizeJobAndPoll(payload, slowHint = "") {
   const stateText = $("optState");
+  state.optimizeStarting = true;
+  setOptimizeJobStatus("queued");
   setOptimizeButtonsDisabled(true);
   stateText.textContent = `优化中...${slowHint}`;
   startOptimizeProgress();
@@ -3521,6 +3959,8 @@ async function startOptimizeJobAndPoll(payload, slowHint = "") {
   const jobId = String(data?.job_id || "").trim();
   if (!jobId) throw new Error("优化任务创建失败：缺少 job_id");
   setPendingOptimizeJobId(jobId);
+  setOptimizeJobStatus(String(data?.status || "queued"));
+  updateOptimizeCancelButton();
   schedulePersistUiState();
   pollOptimizeJob(jobId);
 }
@@ -3528,12 +3968,39 @@ async function startOptimizeJobAndPoll(payload, slowHint = "") {
 function resumePendingOptimizeJobIfAny() {
   const jobId = getPendingOptimizeJobId();
   if (!jobId) return false;
+  state.optimizeStarting = false;
   setPendingOptimizeJobId(jobId);
+  setOptimizeJobStatus("queued");
   setOptimizeButtonsDisabled(true);
   $("optState").textContent = "检测到未完成优化任务，正在恢复...";
   startOptimizeProgress();
   pollOptimizeJob(jobId);
   return true;
+}
+
+async function cancelOptimizeJob() {
+  const jobId = String(state.currentOptimizeJobId || "").trim();
+  if (!jobId || state.optimizeCancelBusy) return;
+  state.optimizeCancelBusy = true;
+  updateOptimizeCancelButton();
+  try {
+    const resp = await fetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || "取消失败");
+    const status = String(data?.status || "").toLowerCase() || "canceled";
+    setOptimizeJobStatus(status);
+    $("resultHint").textContent = "已取消";
+    $("optState").textContent = "优化已取消。";
+    stopOptimizeProgress(false);
+    finishOptimizeJobTracking();
+  } catch (err) {
+    $("optState").textContent = String(err?.message || err || "取消失败");
+  } finally {
+    state.optimizeCancelBusy = false;
+    updateOptimizeCancelButton();
+  }
 }
 
 async function runOptimize() {
@@ -3566,7 +4033,8 @@ async function bootstrap() {
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "bootstrap failed");
 
-  state.cards = data.cards || [];
+  state.cards = (data.cards || []).map((card) => prepareCardForUi(card));
+  state.cardsByCode = new Map(state.cards.map((c) => [String(c.code || ""), c]).filter((x) => x[0]));
   rebuildMemberNameAliasMap();
   state.songs = (data.songs || []).filter((s) => s.zawa_available);
   state.defaults = data.defaults || {};
@@ -3592,6 +4060,7 @@ async function bootstrap() {
   $("optTopN").value = state.defaults.optimize?.top_n || 5;
   $("optPoolScope").value = state.defaults.optimize?.pool_scope || "owned";
   renderProfileOptions();
+  updateProfileAutoSaveButton();
   const persisted = loadPersistedUiState();
   const profileNames = Object.keys(state.profiles).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
   const preferredProfile =
@@ -3612,6 +4081,7 @@ async function bootstrap() {
   initSongSelect();
   if (persisted) {
     applyPersistedUiState(persisted);
+    updateProfileAutoSaveButton();
     renderColorTags();
     renderGroupTags();
     renderSortTags();
@@ -3654,13 +4124,37 @@ function bindEvents() {
       applyDefaultBaseline();
       return;
     }
-    setProfileHint(`已选择账号「${name}」，点击“读取账号”应用成员分。`);
-    schedulePersistUiState();
+    if (!state.profiles[name]) {
+      setProfileHint(`读取失败：账号「${name}」不存在。`);
+      return;
+    }
+    applyProfile(name);
+    profileSelect.value = name;
   });
-  const loadProfileBtn = $("loadProfileBtn");
-  if (loadProfileBtn) loadProfileBtn.addEventListener("click", loadSelectedProfileByMenu);
+  const profileActionDrawerToggle = $("profileActionDrawerToggle");
+  if (profileActionDrawerToggle) profileActionDrawerToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const expanded = profileActionDrawerToggle.getAttribute("aria-expanded") === "true";
+    setProfileActionDrawerOpen(!expanded);
+  });
+  const profileActionDrawerMenu = $("profileActionDrawerMenu");
+  if (profileActionDrawerMenu) {
+    profileActionDrawerMenu.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("#profileActionDrawer")) return;
+    closeProfileActionDrawer();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeProfileActionDrawer();
+  });
   const saveProfileBtn = $("saveProfileBtn");
   if (saveProfileBtn) saveProfileBtn.addEventListener("click", async () => {
+    closeProfileActionDrawer();
     try {
       const name = String($("profileSelect").value || state.activeProfile || "").trim();
       if (!name) throw new Error("请先选择一个账号再保存");
@@ -3669,8 +4163,107 @@ function bindEvents() {
       setProfileHint(`保存失败：${err.message || err}`);
     }
   });
+  const exportProfilesBtn = $("exportProfilesBtn");
+  if (exportProfilesBtn) exportProfilesBtn.addEventListener("click", async () => {
+    closeProfileActionDrawer();
+    try {
+      const selectedName = getSelectedProfileName();
+      const exportName = selectedName && state.profiles[selectedName] ? selectedName : "";
+      const payload = await exportProfilesFromServer(exportName);
+      const stamp = makeTimestampTag();
+      const scope = exportName ? normalizeDownloadFilePart(exportName, "profile") : "profiles";
+      const fileName = `uoa_${scope}_${stamp}.json`;
+      downloadJsonAsFile(fileName, payload);
+      setProfileHint(exportName ? `已导出账号「${exportName}」。` : "已导出全部账号资料。");
+    } catch (err) {
+      setProfileHint(`导出失败：${err.message || err}`);
+    }
+  });
+  const importProfilesBtn = $("importProfilesBtn");
+  if (importProfilesBtn) importProfilesBtn.addEventListener("click", () => {
+    closeProfileActionDrawer();
+    const input = $("importProfilesFileInput");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  });
+  const importProfilesFileInput = $("importProfilesFileInput");
+  if (importProfilesFileInput) importProfilesFileInput.addEventListener("change", async (ev) => {
+    const input = ev.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files && input.files[0] ? input.files[0] : null;
+    if (!file) return;
+    try {
+      const rawText = await file.text();
+      const payload = JSON.parse(String(rawText || "").replace(/^\uFEFF/, ""));
+      const data = await importProfilesToServer(payload);
+      const loadedName = await reloadProfilesFromServer(String(data?.active_profile || "").trim());
+      scheduleWorkspacePanelHeightSync();
+      schedulePersistUiState();
+      const importedCount = Number(data?.imported_count || 0);
+      const createdCount = Array.isArray(data?.created) ? data.created.length : 0;
+      const updatedCount = Array.isArray(data?.updated) ? data.updated.length : 0;
+      const skippedCount = Array.isArray(data?.skipped) ? data.skipped.length : 0;
+      const loadedText = loadedName ? `，已读取「${loadedName}」` : "";
+      setProfileHint(`导入完成：新增 ${createdCount}，覆盖 ${updatedCount}，跳过 ${skippedCount}（共 ${importedCount}）${loadedText}。`);
+    } catch (err) {
+      setProfileHint(`导入失败：${err.message || err}`);
+    } finally {
+      input.value = "";
+    }
+  });
+  const toggleProfileAutoSaveBtn = $("toggleProfileAutoSaveBtn");
+  if (toggleProfileAutoSaveBtn) toggleProfileAutoSaveBtn.addEventListener("click", () => {
+    setProfileAutoSaveEnabled(!state.profileAutoSaveEnabled);
+  });
+  const showProfileBackupsBtn = $("showProfileBackupsBtn");
+  if (showProfileBackupsBtn) showProfileBackupsBtn.addEventListener("click", async () => {
+    closeProfileActionDrawer();
+    try {
+      await openProfileBackupsModal();
+    } catch (err) {
+      setProfileHint(`读取备份失败：${err.message || err}`);
+    }
+  });
+  const closeProfileBackupsBtn = $("closeProfileBackupsBtn");
+  if (closeProfileBackupsBtn) closeProfileBackupsBtn.addEventListener("click", closeProfileBackupsModal);
+  document.querySelectorAll("[data-close-profile-backups-modal]").forEach((el) => {
+    el.addEventListener("click", closeProfileBackupsModal);
+  });
+  const profileBackupsList = $("profileBackupsList");
+  if (profileBackupsList) profileBackupsList.addEventListener("click", async (ev) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const restoreBtn = target.closest("button[data-restore-profile-backup]");
+    const deleteBtn = target.closest("button[data-delete-profile-backup]");
+    if (!restoreBtn && !deleteBtn) return;
+    const actionBtn = restoreBtn || deleteBtn;
+    const backupFile = String(
+      actionBtn?.getAttribute("data-restore-profile-backup") || actionBtn?.getAttribute("data-delete-profile-backup") || ""
+    ).trim();
+    const profileName = String(state.profileBackupsName || getSelectedProfileName()).trim();
+    if (!profileName || !backupFile) return;
+    actionBtn.disabled = true;
+    try {
+      if (restoreBtn) {
+        await restoreProfileByBackup(profileName, backupFile);
+      } else if (deleteBtn) {
+        const ok = window.confirm("确认删除这条备份吗？\n此操作不可撤销。");
+        if (!ok) return;
+        await deleteProfileBackupFromServer(profileName, backupFile);
+        setProfileHint(`已删除账号「${profileName}」的一条备份。`);
+      }
+      const backups = await fetchProfileBackupsFromServer(profileName, 40);
+      renderProfileBackupsModal(profileName, backups);
+    } catch (err) {
+      setProfileHint(`${restoreBtn ? "恢复" : "删除"}失败：${err?.message || err}`);
+    } finally {
+      actionBtn.disabled = false;
+    }
+  });
   const deleteProfileBtn = $("deleteProfileBtn");
   if (deleteProfileBtn) deleteProfileBtn.addEventListener("click", async () => {
+    closeProfileActionDrawer();
     const name = String($("profileSelect").value || state.activeProfile || "").trim();
     if (!name) return;
     try {
@@ -3680,7 +4273,10 @@ function bindEvents() {
     }
   });
   const openProfileBuilderBtn = $("openProfileBuilderBtn");
-  if (openProfileBuilderBtn) openProfileBuilderBtn.addEventListener("click", openProfileBuilderModal);
+  if (openProfileBuilderBtn) openProfileBuilderBtn.addEventListener("click", () => {
+    closeProfileActionDrawer();
+    openProfileBuilderModal();
+  });
   const closeProfileBuilderBtn = $("closeProfileBuilderBtn");
   if (closeProfileBuilderBtn) closeProfileBuilderBtn.addEventListener("click", closeProfileBuilderModal);
   document.querySelectorAll("[data-close-profile-modal]").forEach((el) => {
@@ -3745,8 +4341,8 @@ function bindEvents() {
   });
 
   ["qSearch"].forEach((id) => {
-    $(id).addEventListener("input", renderCardList);
-    $(id).addEventListener("change", renderCardList);
+    $(id).addEventListener("input", scheduleRenderCardList);
+    $(id).addEventListener("change", scheduleRenderCardList);
   });
   const cardListScopeEl = $("cardListScope");
   if (cardListScopeEl) {
@@ -3760,7 +4356,7 @@ function bindEvents() {
   if (mode) mode.addEventListener("change", onModeChange);
   const groupPower = $("groupPower");
   if (groupPower) groupPower.addEventListener("change", () => {
-    if (state.activeProfile) setProfileHint(`账号「${state.activeProfile}」已加载；当前参数已被手动修改，可点“保存账号”覆盖。`);
+    if (state.activeProfile) scheduleActiveProfileAutoSave("group 总综合力已修改");
   });
   const optPoolScope = $("optPoolScope");
   if (optPoolScope) optPoolScope.addEventListener("change", () => {
@@ -3771,6 +4367,8 @@ function bindEvents() {
   if (resetFiltersQuickBtn) resetFiltersQuickBtn.addEventListener("click", resetFiltersQuick);
   const runOptimizeBtn = $("runOptimizeBtn");
   if (runOptimizeBtn) runOptimizeBtn.addEventListener("click", runOptimize);
+  const optCancelBtn = $("optCancelBtn");
+  if (optCancelBtn) optCancelBtn.addEventListener("click", cancelOptimizeJob);
   const runOptimizeQuickBtn = $("runOptimizeQuickBtn");
   if (runOptimizeQuickBtn) runOptimizeQuickBtn.addEventListener("click", () => {
     $("mode").value = "single";
