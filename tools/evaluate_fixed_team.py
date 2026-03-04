@@ -366,10 +366,7 @@ def main() -> None:
             else:
                 profiles = []
                 for c in team_cards:
-                    proc_mult = max(
-                        color_mult.get(c.color, 1.0),
-                        member_mult.get(c.member_name_norm, 1.0),
-                    )
+                    proc_mult = opt._card_skill_proc_multiplier(c, center, color_mult, member_mult)
                     profiles.append(
                         zsm.parse_card_skill_profile(
                             skill_desc=c.skill_desc,

@@ -115,11 +115,7 @@ def _build_skill_profiles(team: opt.TeamResult, song_color: str) -> list[zsm.Ski
     color_mult, member_mult = opt._collect_skill_rate_multipliers(team.cards, team.center)
     profiles: list[zsm.SkillProfile] = []
     for c in team.cards:
-        proc_mult = max(
-            1.0,
-            color_mult.get(c.color, 1.0),
-            member_mult.get(c.member_name_norm, 1.0),
-        )
+        proc_mult = opt._card_skill_proc_multiplier(c, team.center, color_mult, member_mult)
         profiles.append(
             zsm.parse_card_skill_profile(
                 skill_desc=c.skill_desc,
@@ -183,11 +179,7 @@ def _song_quick_objective(
     ev_score = 0.0
     ev_combo = 0.0
     for c in team_cards:
-        proc_mult = max(
-            1.0,
-            color_mult.get(c.color, 1.0),
-            member_mult.get(c.member_name_norm, 1.0),
-        )
+        proc_mult = opt._card_skill_proc_multiplier(c, center, color_mult, member_mult)
         pkey = (c.code, song_color, round(float(proc_mult), 4))
         profile = profile_cache.get(pkey)
         if profile is None:
@@ -563,7 +555,7 @@ def _skill_detail_lines(team: opt.TeamResult, song_color: str, type_bonus_rate: 
     color_mult, member_mult = opt._collect_skill_rate_multipliers(team.cards, team.center)
     lines: list[str] = []
     for c in team.cards:
-        proc_mult = max(1.0, color_mult.get(c.color, 1.0), member_mult.get(c.member_name_norm, 1.0))
+        proc_mult = opt._card_skill_proc_multiplier(c, team.center, color_mult, member_mult)
         same_color = (song_color == "ALL") or (c.color == song_color)
         tb_vo = int(math.ceil(c.vo * type_bonus_rate)) if same_color else 0
         tb_da = int(math.ceil(c.da * type_bonus_rate)) if same_color else 0

@@ -244,6 +244,10 @@ front_post = front_pre + type_bonus_total
 ### 8.4 分布模拟
 
 - 使用 `zawa_score_model.simulate(...)` 做 Monte Carlo。
+- 触发率倍率口径:
+  - V/S 吸收链统一按 `1 + (m - 1) * scale` 缩放。
+  - `S.teller` 队长时，成员名倍率只对 `Véaut` 卡生效；同名普通卡不吃成员名倍率。
+  - `Véaut` 队长时，同名普通卡可吃成员名倍率。
 - 输出顺序固定:
   - `min -> -3σ -> -2σ -> -1σ -> median -> +1σ -> +2σ -> +3σ -> max`
 

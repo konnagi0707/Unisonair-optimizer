@@ -127,6 +127,10 @@ def _is_veaut_card(card: "Card") -> bool:
     return "veaut" in _title_key(card.title)
 
 
+def _is_steller_card(card: "Card") -> bool:
+    return "s.teller" in _title_key(card.title)
+
+
 MANUAL_EXPECTED_OVERRIDES = {
     _normalize_skill_key(k): v for k, v in MANUAL_EXPECTED_OVERRIDES_RAW.items()
 }
@@ -1037,6 +1041,30 @@ def _collect_skill_rate_multipliers(team: list[Card], center: Card) -> tuple[dic
     return color_mult, member_mult
 
 
+def _member_rate_applies_to_card(card: Card, center: Card) -> bool:
+    # In-game asymmetry:
+    # - S.teller center: member-rate chain targets Véaut cards only.
+    # - Véaut center: same-member normal cards are eligible.
+    if center.vs_rule is None:
+        return True
+    if _is_steller_card(center):
+        return _is_veaut_card(card)
+    return True
+
+
+def _card_skill_proc_multiplier(
+    card: Card,
+    center: Card,
+    color_mult: dict[str, float],
+    member_mult: dict[str, float],
+) -> float:
+    m_color = float(color_mult.get(card.color, 1.0))
+    m_member = 1.0
+    if _member_rate_applies_to_card(card, center):
+        m_member = float(member_mult.get(card.member_name_norm, 1.0))
+    return max(1.0, m_color, m_member)
+
+
 def _skill_proc_probability(desc: str) -> float:
     m = re.search(r"([0-9]+(?:\.[0-9]+)?)%\s*の確率", desc or "")
     if not m:
@@ -1056,9 +1084,7 @@ def _team_skill_ev(team: list[Card], center: Card) -> tuple[float, float, float,
     var_combo = 0.0
 
     for c in team:
-        m_color = color_mult.get(c.color, 1.0)
-        m_member = member_mult.get(c.member_name_norm, 1.0)
-        m = max(1.0, m_color, m_member)
+        m = _card_skill_proc_multiplier(c, center, color_mult, member_mult)
         p = _skill_proc_probability(c.skill_desc)
 
         # Keep objective scoring consistent with zawa preset axis behavior:
@@ -1254,7 +1280,11 @@ def _support_shortlist(
 
         same_member_bonus = 0.0
         center_member_mult = center.leader_skill_rate_member.get(center.member_name_norm, 1.0)
-        if c.member_name_norm == center.member_name_norm and center_member_mult > 1.0:
+        if (
+            c.member_name_norm == center.member_name_norm
+            and center_member_mult > 1.0
+            and _member_rate_applies_to_card(c, center)
+        ):
             same_member_bonus += 240.0 * (center_member_mult - 1.0)
         if center_is_veaut and c.member_name_norm in veaut_member_norms:
             same_member_bonus += 90.0
@@ -1632,8 +1662,10 @@ def _team_effect_lines(team: TeamResult) -> list[str]:
         key = c.member_name_norm
         if key in seen_members:
             continue
-        seen_members.add(key)
+        if not _member_rate_applies_to_card(c, center):
+            continue
         m = member_mult.get(key, 1.0)
+        seen_members.add(key)
         if m > 1.0001:
             lines.append(f"{c.member_name}のスキル発動率が{(m - 1.0) * 100.0:.1f}%アップ")
     return lines

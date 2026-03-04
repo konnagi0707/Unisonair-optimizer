@@ -500,10 +500,13 @@ def _team_effect_summary(cards: list[opt.Card], center: opt.Card) -> str:
 
     seen_members: set[str] = set()
     for c in cards:
-        if c.member_name in seen_members:
+        key = c.member_name_norm
+        if key in seen_members:
             continue
-        seen_members.add(c.member_name)
-        val = float(member_mult.get(c.member_name_norm, 1.0))
+        if not opt._member_rate_applies_to_card(c, center):
+            continue
+        seen_members.add(key)
+        val = float(member_mult.get(key, 1.0))
         if val > 1.0001:
             parts.append(f"{c.member_name}のスキル発動率が{(val - 1.0) * 100.0:.1f}%アップ")
 
@@ -2417,11 +2420,7 @@ class ScoringEngine:
             skill_profiles: list[zsm.SkillProfile] = []
             skill_rows: list[dict[str, Any]] = []
             for c in cards:
-                proc_mult = max(
-                    1.0,
-                    float(color_mult.get(c.color, 1.0)),
-                    float(member_mult.get(c.member_name_norm, 1.0)),
-                )
+                proc_mult = opt._card_skill_proc_multiplier(c, center, color_mult, member_mult)
                 same_color_song = bool(song["color"] == "ALL" or c.color == song["color"])
                 profile = zsm.parse_card_skill_profile(
                     skill_desc=c.skill_desc,

@@ -95,7 +95,7 @@ def _team_detail_rows(team: opt.TeamResult, song: opt.Song, type_bonus_rate: flo
 
     rows: list[dict[str, Any]] = []
     for c in team.cards:
-        m = max(1.0, color_mult.get(c.color, 1.0), member_mult.get(c.member_name_norm, 1.0))
+        m = opt._card_skill_proc_multiplier(c, center, color_mult, member_mult)
         profile = zsm.parse_card_skill_profile(
             skill_desc=c.skill_desc,
             card_color=c.color,
