@@ -100,6 +100,7 @@ const UI_STATE_STORAGE_KEY = "uoa_scoring_ui_state_v2";
 const OPTIMIZE_JOB_STORAGE_KEY = "uoa_scoring_optimize_job_id_v1";
 const RESULT_STATE_STORAGE_KEY = "uoa_scoring_result_state_v2";
 const API_BASE_STORAGE_KEY = "uoa_scoring_api_base_v1";
+const GITHUB_PAGES_DEFAULT_API_BASE = "https://uoa-py-662909.azurewebsites.net";
 const UI_STATE_VERSION = 1;
 const RESULT_STATE_VERSION = 2;
 let persistUiStateTimer = null;
@@ -141,7 +142,7 @@ function detectApiBase() {
   if (storedBase) return storedBase;
 
   const host = String(window.location.hostname || "").toLowerCase();
-  if (host.endsWith("github.io")) return "http://127.0.0.1:8765";
+  if (host.endsWith("github.io")) return GITHUB_PAGES_DEFAULT_API_BASE;
   return "";
 }
 
