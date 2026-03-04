@@ -100,6 +100,11 @@ const UI_STATE_STORAGE_KEY = "uoa_scoring_ui_state_v2";
 const OPTIMIZE_JOB_STORAGE_KEY = "uoa_scoring_optimize_job_id_v1";
 const RESULT_STATE_STORAGE_KEY = "uoa_scoring_result_state_v2";
 const API_BASE_STORAGE_KEY = "uoa_scoring_api_base_v1";
+const LOCAL_PROFILES_STORAGE_KEY = "uoa_profiles_local_v1";
+const LOCAL_PROFILE_BACKUPS_STORAGE_KEY = "uoa_profile_backups_local_v1";
+const LOCAL_PROFILE_BACKUP_KEEP = 20;
+const PROFILES_EXPORT_FORMAT = "uoa_profiles_export";
+const PROFILES_EXPORT_VERSION = 1;
 const GITHUB_PAGES_DEFAULT_API_BASE = "https://uoa-py-662909.azurewebsites.net";
 const UI_STATE_VERSION = 1;
 const RESULT_STATE_VERSION = 2;
@@ -147,6 +152,12 @@ function detectApiBase() {
 }
 
 const API_BASE = detectApiBase();
+
+function isCloudProfileStorage() {
+  // Privacy-first hard lock:
+  // profile account storage is local-only and cloud mode is disabled.
+  return false;
+}
 
 function resolveApiUrl(rawUrl) {
   const url = String(rawUrl || "").trim();
@@ -778,7 +789,171 @@ function buildProfileAutoSaveSummary(name, beforeProfile, afterProfile) {
   return buildProfileSaveSummary(name, beforeProfile, afterProfile).replace(/^已保存账号/, "已自动保存账号");
 }
 
+function normalizeStoredProfile(raw) {
+  const profile = raw && typeof raw === "object" ? raw : {};
+  return {
+    group_power: Math.max(0, parseInt(String(profile.group_power || 0), 10) || 0),
+    member_points: sanitizeMemberPointsMap(profile.member_points || {}),
+    owned_codes: toUniqueStringArray(profile.owned_codes || []),
+    exclude_codes: toUniqueStringArray(profile.exclude_codes || []),
+    saved_at: String(profile.saved_at || ""),
+  };
+}
+
+function readLocalJson(key, fallbackValue) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallbackValue;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallbackValue;
+  } catch (_) {
+    return fallbackValue;
+  }
+}
+
+function writeLocalJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function loadLocalProfilesMap() {
+  const root = readLocalJson(LOCAL_PROFILES_STORAGE_KEY, { profiles: {} });
+  const profilesRaw = root && typeof root === "object" ? root.profiles : {};
+  const profiles = {};
+  if (!profilesRaw || typeof profilesRaw !== "object") return profiles;
+  Object.entries(profilesRaw).forEach(([name, p]) => {
+    const key = String(name || "").trim();
+    if (!key) return;
+    profiles[key] = normalizeStoredProfile(p);
+  });
+  return profiles;
+}
+
+function saveLocalProfilesMap(profiles) {
+  const payload = { profiles: {} };
+  Object.entries(profiles || {}).forEach(([name, p]) => {
+    const key = String(name || "").trim();
+    if (!key) return;
+    payload.profiles[key] = normalizeStoredProfile(p);
+  });
+  writeLocalJson(LOCAL_PROFILES_STORAGE_KEY, payload);
+}
+
+function loadLocalBackupsMap() {
+  const root = readLocalJson(LOCAL_PROFILE_BACKUPS_STORAGE_KEY, { backups: {} });
+  const backupsRaw = root && typeof root === "object" ? root.backups : {};
+  const out = {};
+  if (!backupsRaw || typeof backupsRaw !== "object") return out;
+  Object.entries(backupsRaw).forEach(([name, rows]) => {
+    const key = String(name || "").trim();
+    if (!key || !Array.isArray(rows)) return;
+    out[key] = rows
+      .map((row) => {
+        const item = row && typeof row === "object" ? row : {};
+        return {
+          backup_file: String(item.backup_file || "").trim(),
+          backup_created_at: String(item.backup_created_at || "").trim(),
+          profile_saved_at: String(item.profile_saved_at || "").trim(),
+          group_power: Math.max(0, parseInt(String(item.group_power || 0), 10) || 0),
+          member_point_count: Math.max(0, parseInt(String(item.member_point_count || 0), 10) || 0),
+          owned_count: Math.max(0, parseInt(String(item.owned_count || 0), 10) || 0),
+          signature: String(item.signature || "").trim(),
+          profile: normalizeStoredProfile(item.profile || {}),
+        };
+      })
+      .filter((x) => x.backup_file);
+  });
+  return out;
+}
+
+function saveLocalBackupsMap(backups) {
+  const payload = { backups: {} };
+  Object.entries(backups || {}).forEach(([name, rows]) => {
+    const key = String(name || "").trim();
+    if (!key || !Array.isArray(rows)) return;
+    payload.backups[key] = rows.map((row) => {
+      const item = row && typeof row === "object" ? row : {};
+      const profile = normalizeStoredProfile(item.profile || {});
+      return {
+        backup_file: String(item.backup_file || "").trim(),
+        backup_created_at: String(item.backup_created_at || "").trim(),
+        profile_saved_at: String(item.profile_saved_at || "").trim(),
+        group_power: Math.max(0, parseInt(String(item.group_power || 0), 10) || 0),
+        member_point_count: Math.max(0, parseInt(String(item.member_point_count || 0), 10) || 0),
+        owned_count: Math.max(0, parseInt(String(item.owned_count || 0), 10) || 0),
+        signature: String(item.signature || "").trim(),
+        profile,
+      };
+    });
+  });
+  writeLocalJson(LOCAL_PROFILE_BACKUPS_STORAGE_KEY, payload);
+}
+
+function profilePayloadSignatureLocal(profile) {
+  const canonical = canonicalizeProfileSnapshot(profile || {});
+  return JSON.stringify(canonical);
+}
+
+function makeLocalBackupStamp() {
+  const now = new Date();
+  const pad2 = (v) => String(v).padStart(2, "0");
+  const ms = String(now.getUTCMilliseconds()).padStart(3, "0");
+  return `${now.getUTCFullYear()}${pad2(now.getUTCMonth() + 1)}${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}${pad2(now.getUTCSeconds())}.${ms}Z`;
+}
+
+function pushLocalProfileBackup(name, previousProfile) {
+  const key = String(name || "").trim();
+  if (!key) return;
+  const prev = normalizeStoredProfile(previousProfile || {});
+  const signature = profilePayloadSignatureLocal(prev);
+  const backups = loadLocalBackupsMap();
+  const list = Array.isArray(backups[key]) ? backups[key] : [];
+  if (list.length > 0 && String(list[0].signature || "") === signature) return;
+  const stamp = makeLocalBackupStamp();
+  const backup = {
+    backup_file: `account_profiles.${stamp}.json`,
+    backup_created_at: stamp,
+    profile_saved_at: String(prev.saved_at || ""),
+    group_power: Math.max(0, parseInt(String(prev.group_power || 0), 10) || 0),
+    member_point_count: Object.keys(prev.member_points || {}).length,
+    owned_count: toUniqueStringArray(prev.owned_codes || []).length,
+    signature,
+    profile: prev,
+  };
+  backups[key] = [backup, ...list].slice(0, LOCAL_PROFILE_BACKUP_KEEP);
+  saveLocalBackupsMap(backups);
+}
+
+function extractImportProfilesPayload(req) {
+  if (!req || typeof req !== "object") {
+    throw new Error("import payload must be a JSON object");
+  }
+  const payload = req.data && typeof req.data === "object" ? req.data : req;
+  const activeProfile = String(payload.active_profile || req.active_profile || "").trim();
+  const imported = {};
+
+  if (payload.profiles && typeof payload.profiles === "object" && !Array.isArray(payload.profiles)) {
+    Object.entries(payload.profiles).forEach(([name, profile]) => {
+      const key = String(name || "").trim();
+      if (!key || !profile || typeof profile !== "object") return;
+      imported[key] = normalizeStoredProfile(profile);
+    });
+  } else {
+    const singleName = String(payload.name || req.name || "").trim();
+    const singleProfile = payload.profile && typeof payload.profile === "object" ? payload.profile : req.profile;
+    if (singleName && singleProfile && typeof singleProfile === "object") {
+      imported[singleName] = normalizeStoredProfile(singleProfile);
+    }
+  }
+  if (!Object.keys(imported).length) {
+    throw new Error("no valid profiles found in import payload");
+  }
+  return { imported, activeProfile };
+}
+
 async function fetchProfilesFromServer() {
+  if (!isCloudProfileStorage()) {
+    return loadLocalProfilesMap();
+  }
   const resp = await apiFetch("/api/profiles");
   const data = await resp.json();
   if (!resp.ok) {
@@ -790,6 +965,25 @@ async function fetchProfilesFromServer() {
 }
 
 async function saveProfileToServer(name, snapshot) {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    if (!key) throw new Error("账号名不能为空");
+    const profiles = loadLocalProfilesMap();
+    const previous = profiles[key];
+    const next = normalizeStoredProfile({
+      group_power: parseInt(String(snapshot?.group_power || 0), 10) || 0,
+      member_points: snapshot?.member_points || {},
+      owned_codes: Array.isArray(snapshot?.owned_codes) ? snapshot.owned_codes : [],
+      exclude_codes: [],
+      saved_at: new Date().toISOString(),
+    });
+    if (previous && profilePayloadSignatureLocal(previous) !== profilePayloadSignatureLocal(next)) {
+      pushLocalProfileBackup(key, previous);
+    }
+    profiles[key] = next;
+    saveLocalProfilesMap(profiles);
+    return next;
+  }
   const resp = await apiFetch("/api/profiles", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -812,6 +1006,20 @@ async function saveProfileToServer(name, snapshot) {
 }
 
 async function fetchProfileBackupsFromServer(name, limit = 30) {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    if (!key) throw new Error("账号名不能为空");
+    const backups = loadLocalBackupsMap();
+    const list = Array.isArray(backups[key]) ? backups[key] : [];
+    return list.slice(0, Math.max(1, Math.min(80, limit))).map((row) => ({
+      backup_file: row.backup_file,
+      backup_created_at: row.backup_created_at,
+      profile_saved_at: row.profile_saved_at,
+      group_power: row.group_power,
+      member_point_count: row.member_point_count,
+      owned_count: row.owned_count,
+    }));
+  }
   const key = String(name || "").trim();
   if (!key) throw new Error("账号名不能为空");
   const resp = await apiFetch(`/api/profiles/${encodeURIComponent(key)}/backups?limit=${Math.max(1, Math.min(80, limit))}`);
@@ -821,6 +1029,19 @@ async function fetchProfileBackupsFromServer(name, limit = 30) {
 }
 
 async function deleteProfileBackupFromServer(name, backupFile) {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    const file = String(backupFile || "").trim();
+    if (!key) throw new Error("账号名不能为空");
+    if (!file) throw new Error("备份文件不能为空");
+    const backups = loadLocalBackupsMap();
+    const list = Array.isArray(backups[key]) ? backups[key] : [];
+    const next = list.filter((x) => String(x?.backup_file || "") !== file);
+    if (next.length === list.length) throw new Error("备份文件不存在");
+    backups[key] = next;
+    saveLocalBackupsMap(backups);
+    return { ok: true, name: key, backup_file: file };
+  }
   const key = String(name || "").trim();
   const file = String(backupFile || "").trim();
   if (!key) throw new Error("账号名不能为空");
@@ -835,6 +1056,29 @@ async function deleteProfileBackupFromServer(name, backupFile) {
 }
 
 async function undoProfileFromServer(name, backupFile = "") {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    if (!key) throw new Error("账号名不能为空");
+    const file = String(backupFile || "").trim();
+    const backups = loadLocalBackupsMap();
+    const list = Array.isArray(backups[key]) ? backups[key] : [];
+    if (!list.length) throw new Error("no backup found for profile");
+    const row = file ? list.find((x) => String(x?.backup_file || "") === file) : list[0];
+    if (!row) throw new Error("backup file not found");
+    const profiles = loadLocalProfilesMap();
+    const restored = normalizeStoredProfile({
+      ...(row.profile || {}),
+      saved_at: new Date().toISOString(),
+    });
+    profiles[key] = restored;
+    saveLocalProfilesMap(profiles);
+    return {
+      ok: true,
+      name: key,
+      profile: restored,
+      from_backup_file: row.backup_file,
+    };
+  }
   const key = String(name || "").trim();
   if (!key) throw new Error("账号名不能为空");
   const payload = {};
@@ -851,6 +1095,26 @@ async function undoProfileFromServer(name, backupFile = "") {
 }
 
 async function exportProfilesFromServer(name = "") {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    const profiles = loadLocalProfilesMap();
+    let exportedProfiles = {};
+    if (key) {
+      if (!profiles[key]) throw new Error("profile not found");
+      exportedProfiles = { [key]: normalizeStoredProfile(profiles[key]) };
+    } else {
+      Object.entries(profiles).forEach(([k, v]) => {
+        exportedProfiles[k] = normalizeStoredProfile(v);
+      });
+    }
+    return {
+      format: PROFILES_EXPORT_FORMAT,
+      version: PROFILES_EXPORT_VERSION,
+      exported_at: new Date().toISOString(),
+      profile_count: Object.keys(exportedProfiles).length,
+      profiles: exportedProfiles,
+    };
+  }
   const key = String(name || "").trim();
   const query = key ? `?name=${encodeURIComponent(key)}` : "";
   const resp = await apiFetch(`/api/profiles/export${query}`);
@@ -860,6 +1124,48 @@ async function exportProfilesFromServer(name = "") {
 }
 
 async function importProfilesToServer(payload) {
+  if (!isCloudProfileStorage()) {
+    const { imported, activeProfile } = extractImportProfilesPayload(payload || {});
+    const profiles = loadLocalProfilesMap();
+    const created = [];
+    const updated = [];
+    const skipped = [];
+    Object.entries(imported).forEach(([name, p]) => {
+      const incoming = normalizeStoredProfile({
+        ...p,
+        saved_at: String(p.saved_at || new Date().toISOString()),
+      });
+      const existing = profiles[name];
+      if (!existing) {
+        profiles[name] = incoming;
+        created.push(name);
+        return;
+      }
+      if (profilePayloadSignatureLocal(existing) === profilePayloadSignatureLocal(incoming)) {
+        skipped.push(name);
+        return;
+      }
+      pushLocalProfileBackup(name, existing);
+      profiles[name] = incoming;
+      updated.push(name);
+    });
+    if (created.length || updated.length) {
+      saveLocalProfilesMap(profiles);
+    }
+    let preferred = "";
+    if (activeProfile && profiles[activeProfile]) preferred = activeProfile;
+    else if (created.length) preferred = created[0];
+    else if (updated.length) preferred = updated[0];
+    else if (skipped.length) preferred = skipped[0];
+    return {
+      ok: true,
+      imported_count: created.length + updated.length,
+      created,
+      updated,
+      skipped,
+      active_profile: preferred,
+    };
+  }
   const resp = await apiFetch("/api/profiles/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1043,6 +1349,16 @@ function setProfileAutoSaveEnabled(on) {
 }
 
 async function deleteProfileFromServer(name) {
+  if (!isCloudProfileStorage()) {
+    const key = String(name || "").trim();
+    if (!key) throw new Error("删除账号失败");
+    const profiles = loadLocalProfilesMap();
+    const existed = Object.prototype.hasOwnProperty.call(profiles, key);
+    if (!existed) return false;
+    delete profiles[key];
+    saveLocalProfilesMap(profiles);
+    return true;
+  }
   const resp = await apiFetch(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "删除账号失败");
@@ -4364,7 +4680,7 @@ async function runOptimize() {
 
 async function bootstrap() {
   const apiHint = API_BASE ? `（API: ${API_BASE}）` : "";
-  $("runState").textContent = `加载数据中${apiHint}...`;
+  $("runState").textContent = `加载数据中${apiHint}（账号: 本地浏览器）...`;
   const resp = await apiFetch("/api/bootstrap", { cache: "no-store" });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "bootstrap failed");

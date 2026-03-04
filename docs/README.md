@@ -7,9 +7,10 @@
 1. `mcp_session_bootstrap.md`
 2. `spec_coding_uoa_scoring_app.md`
 3. `refactor_stability_playbook_20260304.md`
-4. `ui_layout_profile_requirements_20260301.md`
-5. `strict_zawa_rules_manual_20260227.md`
-6. `project_split_guide_20260227.md`
+4. `azure_app_service_deploy.md`
+5. `ui_layout_profile_requirements_20260301.md`
+6. `strict_zawa_rules_manual_20260227.md`
+7. `project_split_guide_20260227.md`
 
 ## GitHub Pages
 
@@ -30,6 +31,15 @@
   - 算分公式与优化流程
   - 数据源与持久化
   - UI 模块结构
+
+### `azure_app_service_deploy.md`
+- Azure App Service（Linux 容器）部署手册。
+- 覆盖:
+  - 数据包上传（Blob + SAS URL）
+  - ACR 构建镜像
+  - Web App 容器配置与环境变量
+  - GitHub Pages 前端 + Azure API 联调方式
+  - workbook 自动同步与数据 URL 热刷新脚本
 
 ### `ui_layout_profile_requirements_20260301.md`
 - 历史 UI/账号配置交互约束文档。

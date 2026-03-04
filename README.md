@@ -218,7 +218,13 @@ python3 tools/refactor_guard.py --refresh
 
 ## 7. 账号与数据持久化
 
-## 7.1 后端账号文件
+## 7.1 默认模式（隐私优先）
+
+- 前端默认将账号保存在浏览器本地 `localStorage`（按浏览器/设备隔离）。
+- 默认不会把账号写入远端后端。
+- 适用于隐私优先的个人使用场景。
+
+## 7.2 后端账号文件（历史接口）
 
 - 文件: `app/data/account_profiles.json`
 - 每个账号包含:
@@ -228,7 +234,11 @@ python3 tools/refactor_guard.py --refresh
   - `exclude_codes`（预留字段）
   - `saved_at`
 
-## 7.2 浏览器本地状态
+说明:
+
+- 当前前端不再写入后端账号接口，后端文件仅作为历史兼容保留。
+
+## 7.3 浏览器本地状态
 
 本地会保存:
 
@@ -307,12 +317,13 @@ python3 tools/refactor_guard.py --refresh
 用途:
 
 - 展示和本地一致的前端界面。
-- 前端在 GitHub Pages 上默认请求本机 `http://127.0.0.1:8765/api`。
+- 前端在 GitHub Pages 上默认请求 Azure API：`https://uoa-py-662909.azurewebsites.net/api`。
+- 账号默认仅保存在浏览器本地（隐私优先，不上传后端）。
 
 限制:
 
-- GitHub Pages 不能运行 Python 后端，算分/配队仍需本地服务。
-- 使用方式：先启动本地 `uvicorn`，再打开 Pages 页面即可。
+- GitHub Pages 不能运行 Python 后端，算分/配队必须走外部后端（如 Azure）。
+- 需要切换后端时，可在 URL 里加 `?api_base=https://<你的后端域名>`。
 
 ## 11.3 部署方式
 
@@ -357,9 +368,62 @@ python3 tools/refactor_guard.py --refresh
 - 账号配置与备份存放在磁盘挂载 `/var/data/runtime`，重启不会丢。
 - 如更新 `masters/catalogs/xlsx`，重新打包并替换 `UOA_DATA_TARBALL_URL` 即可滚动更新。
 
+### 推荐: Azure App Service（Linux 容器）
+
+仓库已提供 Azure 脚本:
+
+- `deploy/azure_upload_dataset_blob.sh`
+- `deploy/azure_deploy_app_service.sh`
+- `deploy/azure_refresh_dataset.sh`
+- `deploy/sync_workbook_to_azure.sh`
+- 详细文档: `docs/azure_app_service_deploy.md`
+
+最短路径:
+
+1. `./deploy/make_dataset_bundle.sh`
+2. `./deploy/azure_upload_dataset_blob.sh`
+3. `./deploy/azure_deploy_app_service.sh`
+
+部署后可直接把 GitHub Pages 前端指向 Azure API:
+
+```text
+https://konnagi0707.github.io/Unisonair-optimizer/?api_base=https://<你的webapp>.azurewebsites.net
+```
+
+#### 自动同步大表并刷新 Azure（推荐）
+
+当你有“可直接下载 xlsx 文件流”的 URL（不是网页分享页）时，可一键同步:
+
+```bash
+export WORKBOOK_SOURCE_URL='https://<direct-file-url>.xlsx'
+export AZ_RESOURCE_GROUP=uoa-rg
+export AZ_STORAGE_ACCOUNT=<你的storage账号>
+export AZ_WEBAPP_NAME=<你的webapp名称>
+
+./deploy/sync_workbook_to_azure.sh
+```
+
+脚本会自动执行:
+
+1. 下载并校验 workbook（非 xlsx 会失败）
+2. 比对 sha256，内容不变则跳过
+3. 重新打包 dataset
+4. 上传 Blob 并生成新 `UOA_DATA_TARBALL_URL`
+5. 更新 Azure Web App 配置并重启，等待 `/api/healthz` 通过
+
+若你只想“替换 URL + 重启”，可直接用:
+
+```bash
+export UOA_DATA_TARBALL_URL="$(cat deploy/dist/azure_dataset_url.txt)"
+export AZ_RESOURCE_GROUP=uoa-rg
+export AZ_WEBAPP_NAME=<你的webapp名称>
+./deploy/azure_refresh_dataset.sh
+```
+
 ## 11.4 发布前检查清单
 
 - [ ] `docs/spec_coding_uoa_scoring_app.md` 已更新
+- [ ] `docs/azure_app_service_deploy.md` 已更新（如改动部署流程）
 - [ ] `README.md` 功能描述与当前 UI 一致
 - [ ] `app/data/account_profiles.json` 无敏感个人数据
 - [ ] 本地启动命令可直接跑通
