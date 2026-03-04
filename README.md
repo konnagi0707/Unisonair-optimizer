@@ -302,15 +302,17 @@ python3 tools/refactor_guard.py --refresh
 
 ## 11.2 GitHub Pages（静态展示页）
 
-已提供 Pages 工作流: `.github/workflows/pages.yml`，会将 `docs/site/` 自动发布到 GitHub Pages。
+已提供 Pages 工作流: `.github/workflows/pages.yml`，会将 `app/static/` 构建后发布到 GitHub Pages（展示同款前端界面）。
 
 用途:
 
-- 展示项目说明、启动方式、仓库文档入口。
+- 展示和本地一致的前端界面。
+- 前端在 GitHub Pages 上默认请求本机 `http://127.0.0.1:8765/api`。
 
 限制:
 
-- GitHub Pages 不能运行 Python 后端，因此不能直接提供算分 API。
+- GitHub Pages 不能运行 Python 后端，算分/配队仍需本地服务。
+- 使用方式：先启动本地 `uvicorn`，再打开 Pages 页面即可。
 
 ## 11.3 部署方式
 

@@ -99,11 +99,64 @@ const DEFAULT_PROFILE_NAME = "琴原美名";
 const UI_STATE_STORAGE_KEY = "uoa_scoring_ui_state_v2";
 const OPTIMIZE_JOB_STORAGE_KEY = "uoa_scoring_optimize_job_id_v1";
 const RESULT_STATE_STORAGE_KEY = "uoa_scoring_result_state_v2";
+const API_BASE_STORAGE_KEY = "uoa_scoring_api_base_v1";
 const UI_STATE_VERSION = 1;
 const RESULT_STATE_VERSION = 2;
 let persistUiStateTimer = null;
 let isApplyingPersistedUiState = false;
 let renderCardListRaf = null;
+
+function normalizeApiBase(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  return text.replace(/\/+$/, "");
+}
+
+function detectApiBase() {
+  const queryBaseRaw = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get("api_base") || "";
+    } catch (_) {
+      return "";
+    }
+  })();
+  const queryBase = normalizeApiBase(queryBaseRaw);
+  if (queryBase) {
+    try {
+      localStorage.setItem(API_BASE_STORAGE_KEY, queryBase);
+    } catch (_) {}
+    return queryBase;
+  }
+
+  const explicitBase = normalizeApiBase(window.UOA_API_BASE || "");
+  if (explicitBase) return explicitBase;
+
+  const storedBase = (() => {
+    try {
+      return normalizeApiBase(localStorage.getItem(API_BASE_STORAGE_KEY) || "");
+    } catch (_) {
+      return "";
+    }
+  })();
+  if (storedBase) return storedBase;
+
+  const host = String(window.location.hostname || "").toLowerCase();
+  if (host.endsWith("github.io")) return "http://127.0.0.1:8765";
+  return "";
+}
+
+const API_BASE = detectApiBase();
+
+function resolveApiUrl(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  if (!url) return "";
+  if (!url.startsWith("/api/")) return url;
+  return API_BASE ? `${API_BASE}${url}` : url;
+}
+
+function apiFetch(url, init) {
+  return fetch(resolveApiUrl(url), init);
+}
 
 function toUniqueStringArray(input) {
   if (!Array.isArray(input)) return [];
@@ -725,7 +778,7 @@ function buildProfileAutoSaveSummary(name, beforeProfile, afterProfile) {
 }
 
 async function fetchProfilesFromServer() {
-  const resp = await fetch("/api/profiles");
+  const resp = await apiFetch("/api/profiles");
   const data = await resp.json();
   if (!resp.ok) {
     throw new Error(data?.detail || "读取账号失败");
@@ -736,7 +789,7 @@ async function fetchProfilesFromServer() {
 }
 
 async function saveProfileToServer(name, snapshot) {
-  const resp = await fetch("/api/profiles", {
+  const resp = await apiFetch("/api/profiles", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -760,7 +813,7 @@ async function saveProfileToServer(name, snapshot) {
 async function fetchProfileBackupsFromServer(name, limit = 30) {
   const key = String(name || "").trim();
   if (!key) throw new Error("账号名不能为空");
-  const resp = await fetch(`/api/profiles/${encodeURIComponent(key)}/backups?limit=${Math.max(1, Math.min(80, limit))}`);
+  const resp = await apiFetch(`/api/profiles/${encodeURIComponent(key)}/backups?limit=${Math.max(1, Math.min(80, limit))}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "读取备份失败");
   return Array.isArray(data?.backups) ? data.backups : [];
@@ -771,7 +824,7 @@ async function deleteProfileBackupFromServer(name, backupFile) {
   const file = String(backupFile || "").trim();
   if (!key) throw new Error("账号名不能为空");
   if (!file) throw new Error("备份文件不能为空");
-  const resp = await fetch(
+  const resp = await apiFetch(
     `/api/profiles/${encodeURIComponent(key)}/backups/${encodeURIComponent(file)}`,
     { method: "DELETE" }
   );
@@ -786,7 +839,7 @@ async function undoProfileFromServer(name, backupFile = "") {
   const payload = {};
   const file = String(backupFile || "").trim();
   if (file) payload.backup_file = file;
-  const resp = await fetch(`/api/profiles/${encodeURIComponent(key)}/undo`, {
+  const resp = await apiFetch(`/api/profiles/${encodeURIComponent(key)}/undo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -799,14 +852,14 @@ async function undoProfileFromServer(name, backupFile = "") {
 async function exportProfilesFromServer(name = "") {
   const key = String(name || "").trim();
   const query = key ? `?name=${encodeURIComponent(key)}` : "";
-  const resp = await fetch(`/api/profiles/export${query}`);
+  const resp = await apiFetch(`/api/profiles/export${query}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "导出失败");
   return data;
 }
 
 async function importProfilesToServer(payload) {
-  const resp = await fetch("/api/profiles/import", {
+  const resp = await apiFetch("/api/profiles/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
@@ -989,7 +1042,7 @@ function setProfileAutoSaveEnabled(on) {
 }
 
 async function deleteProfileFromServer(name) {
-  const resp = await fetch(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
+  const resp = await apiFetch(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "删除账号失败");
   return Boolean(data?.ok);
@@ -1607,7 +1660,10 @@ function cardAvatarHTML(card, size = "md") {
   const iconCatalog = String(card.icon_catalog_url || "").trim();
   const iconFallback = String(card.icon_fallback_url || "").trim();
   // `icon_catalog_url` may point to bundle bytes; prefer browser-displayable fallback URL first.
-  const iconCandidates = [iconFallback, iconApi, iconCatalog].filter(Boolean).filter((x, i, arr) => arr.indexOf(x) === i);
+  const iconCandidates = [iconFallback, iconApi, iconCatalog]
+    .map((u) => resolveApiUrl(u))
+    .filter(Boolean)
+    .filter((x, i, arr) => arr.indexOf(x) === i);
   const iconSrc = iconCandidates[0] || "";
   const iconBackup = iconCandidates[1] || "";
   const loadingMode = size === "lg" ? "auto" : "eager";
@@ -3327,7 +3383,7 @@ async function runEvaluate() {
     const payload = getEvaluatePayload();
     if (btn) btn.disabled = true;
     stateText.textContent = "计算中...";
-    const resp = await fetch("/api/evaluate", {
+    const resp = await apiFetch("/api/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -3855,7 +3911,7 @@ async function runTeamReplaceCompare() {
   renderTeamReplaceComparison(ctx);
   const token = ++teamReplaceCalcToken;
   try {
-    const resp = await fetch("/api/evaluate", {
+    const resp = await apiFetch("/api/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -4163,7 +4219,7 @@ async function pollOptimizeJob(jobId) {
   let resp;
   let data;
   try {
-    resp = await fetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}`);
+    resp = await apiFetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}`);
     data = await resp.json();
   } catch (_) {
     stateText.textContent = "优化状态查询失败，正在重试...";
@@ -4227,7 +4283,7 @@ async function startOptimizeJobAndPoll(payload, slowHint = "") {
   setOptimizeButtonsDisabled(true);
   stateText.textContent = `优化中...${slowHint}`;
   startOptimizeProgress();
-  const resp = await fetch("/api/optimize/jobs", {
+  const resp = await apiFetch("/api/optimize/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -4262,7 +4318,7 @@ async function cancelOptimizeJob() {
   state.optimizeCancelBusy = true;
   updateOptimizeCancelButton();
   try {
-    const resp = await fetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    const resp = await apiFetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
     });
     const data = await resp.json();
@@ -4306,8 +4362,9 @@ async function runOptimize() {
 }
 
 async function bootstrap() {
-  $("runState").textContent = "加载数据中...";
-  const resp = await fetch("/api/bootstrap", { cache: "no-store" });
+  const apiHint = API_BASE ? `（API: ${API_BASE}）` : "";
+  $("runState").textContent = `加载数据中${apiHint}...`;
+  const resp = await apiFetch("/api/bootstrap", { cache: "no-store" });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || "bootstrap failed");
 
@@ -4731,7 +4788,11 @@ async function main() {
     scheduleWorkspacePanelHeightSync();
     syncTopbarOffset();
   } catch (err) {
-    $("resultArea").innerHTML = `<div class="result-card">初始化失败: ${err.message || err}</div>`;
+    const errText = String(err?.message || err || "初始化失败");
+    const bootHint = API_BASE
+      ? `请先启动本地后端（${API_BASE}），再刷新此页面。`
+      : "请先启动本地后端，再刷新此页面。";
+    $("resultArea").innerHTML = `<div class="result-card">初始化失败: ${escHtml(errText)}<br /><span class="card-meta">${escHtml(bootHint)}</span></div>`;
     $("runState").textContent = "";
   }
 }

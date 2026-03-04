@@ -13,7 +13,7 @@
 
 ## GitHub Pages
 
-- 静态展示页入口目录: `docs/site/`
+- 页面源: `app/static/`（由 `deploy/build_pages_site.sh` 构建为 `.pages_site/`）
 - 发布工作流: `.github/workflows/pages.yml`
 
 ## 文档说明

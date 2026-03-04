@@ -4,7 +4,8 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "docs/site/**"
+      - "app/static/**"
+      - "deploy/build_pages_site.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -27,15 +28,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build Pages site from app/static
+        run: ./deploy/build_pages_site.sh
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs/site
+          path: ./.pages_site
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
