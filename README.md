@@ -99,6 +99,18 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
 - `http://127.0.0.1:8765`
 
+也可以用一键脚本:
+
+```bash
+# 前台运行
+./deploy/local_run.sh
+
+# 后台运行
+./deploy/local_run_bg.sh
+./deploy/local_status.sh
+./deploy/local_stop.sh
+```
+
 ## 4.1 Bug 巡检（推荐每次改动后执行）
 
 新增了自动巡检脚本（接口回归 + 默认参数一致性 + DOM 引用漂移 + 账号成员分映射检查）:
@@ -288,7 +300,19 @@ python3 tools/refactor_guard.py --refresh
 - 直接上传本仓库即可。
 - 建议在 GitHub 首页说明“这是带后端 API 的 Web App”。
 
-## 11.2 部署方式
+## 11.2 GitHub Pages（静态展示页）
+
+已提供 Pages 工作流: `.github/workflows/pages.yml`，会将 `docs/site/` 自动发布到 GitHub Pages。
+
+用途:
+
+- 展示项目说明、启动方式、仓库文档入口。
+
+限制:
+
+- GitHub Pages 不能运行 Python 后端，因此不能直接提供算分 API。
+
+## 11.3 部署方式
 
 本项目不是纯静态页面，**仅用 GitHub Pages 不能直接运行**（Pages 无 Python 后端）。
 
@@ -331,7 +355,7 @@ python3 tools/refactor_guard.py --refresh
 - 账号配置与备份存放在磁盘挂载 `/var/data/runtime`，重启不会丢。
 - 如更新 `masters/catalogs/xlsx`，重新打包并替换 `UOA_DATA_TARBALL_URL` 即可滚动更新。
 
-## 11.3 发布前检查清单
+## 11.4 发布前检查清单
 
 - [ ] `docs/spec_coding_uoa_scoring_app.md` 已更新
 - [ ] `README.md` 功能描述与当前 UI 一致

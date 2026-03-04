@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unisonair Optimizer</title>
+    <style>
+      :root {
+        --bg: #f6f8fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --sub: #4b5563;
+        --accent: #0f766e;
+        --border: #dbe3ef;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top right, #dff6ef 0, var(--bg) 45%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 48px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 22px;
+        margin-bottom: 14px;
+      }
+      h1 { margin: 0 0 8px; font-size: 30px; }
+      p { margin: 8px 0; color: var(--sub); line-height: 1.7; }
+      .tag {
+        display: inline-block;
+        border: 1px solid #b8eadf;
+        background: #edfbf7;
+        color: var(--accent);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 13px;
+        margin-right: 8px;
+      }
+      pre {
+        margin: 10px 0 0;
+        padding: 12px;
+        border-radius: 10px;
+        background: #0f172a;
+        color: #e2e8f0;
+        overflow-x: auto;
+        font-size: 13px;
+      }
+      a { color: #0b6e99; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      ul { margin: 8px 0; color: var(--sub); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="card">
+        <span class="tag">UNI'S ON AIR</span>
+        <span class="tag">Team Optimizer</span>
+        <h1>Unisonair Optimizer</h1>
+        <p>
+          这是项目展示页。注意：GitHub Pages 只能托管静态内容，不能直接运行 Python 后端算分服务。
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>本地运行（推荐）</h2>
+        <p>在仓库根目录执行：</p>
+        <pre><code>./deploy/local_run.sh</code></pre>
+        <p>浏览器打开：<code>http://127.0.0.1:8765</code></p>
+        <p>后台运行：</p>
+        <pre><code>./deploy/local_run_bg.sh
+./deploy/local_status.sh
+./deploy/local_stop.sh</code></pre>
+      </section>
+
+      <section class="card">
+        <h2>仓库与文档</h2>
+        <ul>
+          <li><a href="https://github.com/konnagi0707/Unisonair-optimizer">GitHub 仓库</a></li>
+          <li><a href="https://github.com/konnagi0707/Unisonair-optimizer/blob/main/README.md">README</a></li>
+          <li><a href="https://github.com/konnagi0707/Unisonair-optimizer/blob/main/docs/spec_coding_uoa_scoring_app.md">技术规格文档</a></li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
+

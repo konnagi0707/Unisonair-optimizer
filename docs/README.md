@@ -11,6 +11,11 @@
 5. `strict_zawa_rules_manual_20260227.md`
 6. `project_split_guide_20260227.md`
 
+## GitHub Pages
+
+- 静态展示页入口目录: `docs/site/`
+- 发布工作流: `.github/workflows/pages.yml`
+
 ## 文档说明
 
 ### `mcp_session_bootstrap.md`
