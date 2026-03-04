@@ -1,0 +1,44 @@
+{
+  "evaluate": {
+    "bonus_costume_total": 1875,
+    "bonus_member_point_total": 75000,
+    "bonus_office_total": 10070,
+    "bonus_skin_total": 3579,
+    "bonus_type_total": 0,
+    "dist_p2": 6556679,
+    "front_post": 153667,
+    "front_pre": 153667,
+    "scene_effective_total": 60943,
+    "sigma": 206882
+  },
+  "meta": {
+    "card_count": 1415,
+    "masters_version": "20260226161236",
+    "song_count": 315
+  },
+  "optimize": {
+    "candidate_count": 8,
+    "preselected_count": 8,
+    "top1_dist_p2": 7947090,
+    "top1_front_post": 217544,
+    "top1_front_pre": 217544,
+    "top1_team_codes": [
+      "card_15_221_412011",
+      "card_15_210_412031",
+      "card_15_214_412061",
+      "card_15_215_413021",
+      "card_15_221_400611"
+    ]
+  },
+  "scenario": {
+    "center_code": "card_15_221_412011",
+    "eval_team_codes": [
+      "card_15_221_412011",
+      "card_15_221_401321",
+      "card_15_221_400431",
+      "card_15_221_401081",
+      "card_15_221_401531"
+    ],
+    "song_key": "105:G:Dash&Rush"
+  }
+}

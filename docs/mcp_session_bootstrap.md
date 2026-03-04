@@ -7,6 +7,7 @@
 1. `docs/spec_coding_uoa_scoring_app.md`
 2. `README.md`
 3. （按需）专项文档:
+   - `docs/refactor_stability_playbook_20260304.md`
    - `docs/ui_layout_profile_requirements_20260301.md`
    - `docs/strict_zawa_rules_manual_20260227.md`
    - `reports/icon_diagnosis_20260301.md`
@@ -32,6 +33,10 @@
 
 - 启动服务:
   - `python -m uvicorn app.main:app --host 127.0.0.1 --port 8765`
+- 重构护栏:
+  - `python3 tools/refactor_guard.py`
+- 巡检护栏:
+  - `python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765`
 - 页面主流程:
   - 读取账号 -> 选择歌曲 -> 最优配队
   - 结果点击成员 -> 队伍换卡对比

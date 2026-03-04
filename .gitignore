@@ -20,3 +20,10 @@ deploy/dist/
 
 # Local logs
 *.log
+
+# Local large data/runtime (not for repo)
+data/
+runtime/
+catalogs
+masters
+uoa_intel.db

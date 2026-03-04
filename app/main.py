@@ -75,8 +75,12 @@ class EvaluateRequest(BaseModel):
     office_pe: float = 0.17
 
     enable_skin: bool = True
+    front_skin_profile: str = "auto"
     front_skin_rate: float = 0.08
     front_skin_axes: list[str] = Field(default_factory=lambda: ["auto"])
+    front_skin_vo_rate: Optional[float] = None
+    front_skin_da_rate: Optional[float] = None
+    front_skin_pe_rate: Optional[float] = None
     front_skin_target_color: str = "song"
 
     enable_type_bonus: bool = True
@@ -128,8 +132,12 @@ class OptimizeRequest(BaseModel):
     office_pe: float = 0.17
 
     enable_skin: bool = True
+    front_skin_profile: str = "auto"
     front_skin_rate: float = 0.08
     front_skin_axes: list[str] = Field(default_factory=lambda: ["auto"])
+    front_skin_vo_rate: Optional[float] = None
+    front_skin_da_rate: Optional[float] = None
+    front_skin_pe_rate: Optional[float] = None
     front_skin_target_color: str = "song"
 
     enable_type_bonus: bool = True

@@ -215,6 +215,7 @@ body {
   min-width: 0;
   min-height: 0;
   align-self: stretch;
+  overflow: hidden;
 }
 
 .workspace-left .filter-sidebar {
@@ -1121,6 +1122,107 @@ code {
   overflow: visible;
 }
 
+.other-settings-body {
+  gap: 0.16rem;
+}
+
+.other-settings-stack {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.other-setting-card {
+  border: 1px solid #dbe8f0;
+  border-radius: 10px;
+  padding: 0.12rem 0.14rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fcff 100%);
+  display: grid;
+  gap: 0.1rem;
+}
+
+.other-setting-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.12rem;
+  padding-bottom: 0.03rem;
+  border-bottom: 1px dashed #e3edf4;
+}
+
+.other-setting-head h3 {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #1f4055;
+  letter-spacing: 0.01em;
+}
+
+.other-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.08rem 0.14rem;
+}
+
+.other-field {
+  --other-field-input-w: 96px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--other-field-input-w);
+  align-items: center;
+  gap: 0.06rem;
+  min-width: 0;
+}
+
+.other-setting-card .other-field label {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #557081;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.other-setting-card .other-field input,
+.other-setting-card .other-field select {
+  padding: 0.1rem 0.16rem;
+  font-size: 0.75rem;
+  border-radius: 8px;
+  min-height: 28px;
+  width: 100%;
+}
+
+.other-setting-card .other-field input[type="number"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.other-field-num {
+  --other-field-input-w: 84px;
+}
+
+.other-field-rate {
+  --other-field-input-w: 80px;
+}
+
+.other-field-select {
+  --other-field-input-w: 196px;
+}
+
+.other-field-text {
+  --other-field-input-w: 148px;
+}
+
+.other-field-wide {
+  grid-column: 1 / -1;
+}
+
+.other-settings-note {
+  margin: 0.02rem 0 0;
+  color: #5f7483;
+  font-size: 0.72rem;
+}
+
 .sidebar-tool {
   background: #ffffff;
 }
@@ -1262,6 +1364,10 @@ select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px #0e9f9a19;
+}
+
+.filter-sidebar input[type="checkbox"] {
+  accent-color: #0f9f99;
 }
 
 .card-list {
@@ -1508,6 +1614,13 @@ select:focus {
   color: #9a6a00;
   border-color: #ecd8ae;
   background: #fff7e6;
+}
+
+.meta-chip.center-chip {
+  font-weight: 700;
+  color: #0d7470;
+  border-color: #9edfdc;
+  background: #e7f8f7;
 }
 
 .kosa-grid {
@@ -2666,6 +2779,13 @@ th {
   gap: 0.14rem;
 }
 
+.replace-slot-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
 .replace-slot-name {
   font-size: 0.8rem;
   font-weight: 700;
@@ -3374,6 +3494,13 @@ th {
   }
   .options-grid.top-settings-grid {
     grid-template-columns: 1fr;
+  }
+  .other-setting-grid {
+    grid-template-columns: 1fr;
+  }
+  .other-field-select,
+  .other-field-text {
+    --other-field-input-w: 164px;
   }
   .card-row {
     grid-template-columns: 1fr;

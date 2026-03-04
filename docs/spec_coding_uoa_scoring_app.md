@@ -1,6 +1,6 @@
 # UOA 队伍优化模拟 - Spec Coding 文档
 
-更新时间: 2026-03-02
+更新时间: 2026-03-04
 适用仓库: `uoa-scoring`
 
 ## 1. 文档目标
@@ -229,7 +229,7 @@ front_pre = team_power_scene
 
 - `member_point_total = Σ 每卡成员分`
 - `costume_total = (costume_vo + costume_da + costume_pe) * 5`
-- `office_total = Σ ceil(card_vo*office_vo + card_da*office_da + card_pe*office_pe 按轴拆分上取整)`
+- `office_total = Σ floor(card_vo*office_vo) + floor(card_da*office_da) + floor(card_pe*office_pe)（逐卡逐轴下取整）`
 - `skin_total = 依据 front_skin_rate + axes + target_color 逐卡逐轴上取整`
 - `skill_stat_total = (scene_skill_per_card + costume_skill_per_card) * 5`
 
@@ -281,7 +281,7 @@ front_post = front_pre + type_bonus_total
 ## 9.4 缓存
 
 - `ScoringEngine._opt_cache` 内存缓存相同 payload。
-- 最大 24 条，超出 FIFO 弹出。
+- 最大 96 条，超出 FIFO 弹出。
 
 ## 10. 账号、状态与持久化
 
@@ -352,9 +352,27 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 2. 再跑 `optimize/jobs` 验证候选约束。
 3. 最后在结果内做“换卡对比”确认替换逻辑。
 
+### 14.3 重构稳定性护栏
+
+为了在拆分 `app/engine.py`、`app/static/app.js` 时保持行为不漂移，新增:
+
+- 脚本: `tools/refactor_guard.py`
+- 基线: `tools/baselines/refactor_guard_baseline.json`
+
+执行方式:
+
+```bash
+# 校验当前实现与基线是否一致
+python3 tools/refactor_guard.py
+
+# 仅在确认口径变更后刷新基线
+python3 tools/refactor_guard.py --refresh
+```
+
 ## 15. 文档映射（给后续会话/MCP）
 
 - 总规格（本文件）: `docs/spec_coding_uoa_scoring_app.md`
+- 零破坏重构手册: `docs/refactor_stability_playbook_20260304.md`
 - UI 历史约束: `docs/ui_layout_profile_requirements_20260301.md`
 - 口径历史约束: `docs/strict_zawa_rules_manual_20260227.md`
 - 拆仓说明: `docs/project_split_guide_20260227.md`
@@ -379,7 +397,8 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
 1. `docs/mcp_session_bootstrap.md`
 2. `docs/spec_coding_uoa_scoring_app.md`
-3. `README.md`
+3. `docs/refactor_stability_playbook_20260304.md`
+4. `README.md`
 
 仅当涉及专项问题时，再补读:
 

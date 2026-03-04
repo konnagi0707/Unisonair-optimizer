@@ -946,6 +946,43 @@ def _compute_effective_stats(team: list[Card], center: Card) -> tuple[int, int, 
 
     agg = _aggregate_center_bonus(team, center, rule)
     zero_axes = _mode_zero_axes(rule.mode)
+    # Game front-detail applies ceil per source-effect contribution, then sums.
+    # Aggregated single-pass ceil can drift by a few points on large stats.
+    component_pcts: dict[str, list[float]] = {a: [] for a in AXES}
+    if rule.mode != "max_each":
+        included = _team_included_for_vs(team, center, rule)
+        vectors: list[dict[str, float]] = []
+        for c in included:
+            if c.vs_rule is not None:
+                v = {a: float(c.vs_rule.fixed_bonus.get(a, 0.0)) for a in AXES}
+            else:
+                v = {a: float(c.leader_effect.get(a, 0.0)) for a in AXES}
+            vectors.append(v)
+
+        def _append_scaled(axis: str, raw_val: float) -> None:
+            if raw_val > 0.0:
+                component_pcts[axis].append(raw_val * rule.scale)
+
+        for v in vectors:
+            if rule.mode == "sum_vo":
+                _append_scaled("vo", float(v.get("vo", 0.0)))
+            elif rule.mode == "sum_da":
+                _append_scaled("da", float(v.get("da", 0.0)))
+            elif rule.mode == "sum_pe":
+                _append_scaled("pe", float(v.get("pe", 0.0)))
+            elif rule.mode == "sum_vo_da":
+                _append_scaled("vo", float(v.get("vo", 0.0)))
+                _append_scaled("da", float(v.get("da", 0.0)))
+            elif rule.mode == "sum_vo_pe":
+                _append_scaled("vo", float(v.get("vo", 0.0)))
+                _append_scaled("pe", float(v.get("pe", 0.0)))
+            elif rule.mode == "sum_da_pe":
+                _append_scaled("da", float(v.get("da", 0.0)))
+                _append_scaled("pe", float(v.get("pe", 0.0)))
+            else:
+                for axis in AXES:
+                    _append_scaled(axis, float(v.get(axis, 0.0)))
+
     total = {"vo": 0, "da": 0, "pe": 0}
     for card in team:
         base = {"vo": float(card.vo), "da": float(card.da), "pe": float(card.pe)}
@@ -953,22 +990,31 @@ def _compute_effective_stats(team: list[Card], center: Card) -> tuple[int, int, 
             for a in zero_axes:
                 base[a] = 0.0
         for axis in AXES:
-            pct = 0.0
-            if card.color in rule.agg_target_types:
-                pct += agg[axis]
-            # UOA front-detail panel rounds each card/axis buff result upward before summing.
-            # Using ceil per card here avoids the recurrent ±1~个位偏差 from float-total rounding.
-            total[axis] += int(math.ceil(base[axis] * (1.0 + pct / 100.0)))
+            # Non-target colors keep raw scene values.
+            if card.color not in rule.agg_target_types:
+                total[axis] += int(base[axis])
+                continue
+
+            # For max_each, there is only one selected percentage per axis.
+            if rule.mode == "max_each":
+                total[axis] += int(math.ceil(base[axis] * (1.0 + agg[axis] / 100.0)))
+                continue
+
+            # Sum modes: apply ceil for each source contribution then add base.
+            subtotal = int(base[axis])
+            for pct in component_pcts[axis]:
+                subtotal += int(math.ceil(base[axis] * (pct / 100.0)))
+            total[axis] += int(subtotal)
 
     return int(total["vo"]), int(total["da"]), int(total["pe"])
 
 
 def _collect_skill_rate_multipliers(team: list[Card], center: Card) -> tuple[dict[str, float], dict[str, float]]:
-    if center.vs_rule and _is_veaut_card(center):
+    if center.vs_rule:
         included = _team_included_for_vs(team, center, center.vs_rule)
         rate_scale = center.vs_rule.scale
     else:
-        # S.teller (and non-V/S centers) do not chain-absorb teammate skill-rate buffs.
+        # Non-V/S centers do not chain-absorb teammate skill-rate buffs.
         included = [center]
         rate_scale = 1.0
 

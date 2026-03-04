@@ -6,9 +6,10 @@
 
 1. `mcp_session_bootstrap.md`
 2. `spec_coding_uoa_scoring_app.md`
-3. `ui_layout_profile_requirements_20260301.md`
-4. `strict_zawa_rules_manual_20260227.md`
-5. `project_split_guide_20260227.md`
+3. `refactor_stability_playbook_20260304.md`
+4. `ui_layout_profile_requirements_20260301.md`
+5. `strict_zawa_rules_manual_20260227.md`
+6. `project_split_guide_20260227.md`
 
 ## 文档说明
 
@@ -29,6 +30,10 @@
 - 历史 UI/账号配置交互约束文档。
 - 主要用于回溯 UI 变更背景和文案口径。
 
+### `refactor_stability_playbook_20260304.md`
+- “不改行为先上护栏”的重构手册。
+- 包含 `tools/refactor_guard.py` 基线检查流程与分阶段拆分策略。
+
 ### `strict_zawa_rules_manual_20260227.md`
 - 严格 zawa 口径说明与成员名单口径。
 - 用于验证“为什么这样算”。
@@ -45,3 +50,5 @@
   - `ui_layout_profile_requirements_*.md`
 - 若调整严格口径或统计规则，必须同步更新:
   - `strict_zawa_rules_manual_*.md`
+- 若进行结构重构或模块拆分，必须同步更新:
+  - `refactor_stability_playbook_*.md`

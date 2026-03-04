@@ -13,6 +13,7 @@
 
 - 快速恢复会话上下文: `docs/mcp_session_bootstrap.md`
 - 全量技术规格: `docs/spec_coding_uoa_scoring_app.md`
+- 零破坏重构手册: `docs/refactor_stability_playbook_20260304.md`
 - 文档总索引: `docs/README.md`
 
 ---
@@ -110,6 +111,27 @@ python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765
 
 - 返回码 `0`: 通过（可能含 warning）
 - 返回码 `1`: 有 error，建议先修复再继续改动
+
+## 4.2 重构护栏（重构前后必跑）
+
+新增了行为快照护栏脚本，用于保证“拆文件/清理代码”不改变现有结果口径:
+
+```bash
+# 1) 校验当前实现是否与基线一致
+python3 tools/refactor_guard.py
+
+# 2) 仅在明确口径变更后刷新基线
+python3 tools/refactor_guard.py --refresh
+```
+
+基线文件:
+
+- `tools/baselines/refactor_guard_baseline.json`
+
+建议顺序:
+
+1. `python3 tools/refactor_guard.py`
+2. `python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765`
 
 ---
 

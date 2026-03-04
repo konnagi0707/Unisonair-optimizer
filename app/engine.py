@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import itertools
 import json
 import math
 import os
@@ -50,6 +51,7 @@ _CATALOG_NAME_RE = re.compile(r"^unison_catalog_(\d{8,})\.json$")
 VALID_CANDIDATE_STRATEGIES = {"default", "axis_t1"}
 DEFAULT_OPT_MIN_SKILL_EXPECTED = 2.0
 DEFAULT_PRE_EVAL_TRIALS = 100
+DEFAULT_EXACT_ENUM_CANDIDATE_LIMIT = 0
 
 _CDN_ASSET_BASE_TEMPLATE = "https://cdn-assets.unis-on-air.com/client_assets/{version}/Android/"
 ICON_CACHE_DIR = RUNTIME_DATA_DIR / "card_icons"
@@ -125,11 +127,6 @@ def _center_focus_axes(center: opt.Card) -> set[str]:
 
 
 def _auto_skin_axes(center: opt.Card) -> set[str]:
-    # Match in-game front skin behavior closer:
-    # single-axis center teams still usually use 2-axis skin cards.
-    # Example from user data:
-    #   sum_da (purple) -> Da+Pe 8%
-    #   sum_vo_da (blue) -> Vo+Da 8%
     rule = center.vs_rule
     mode = (rule.mode if rule else "").strip()
     if mode == "sum_vo":
@@ -137,7 +134,7 @@ def _auto_skin_axes(center: opt.Card) -> set[str]:
     if mode == "sum_da":
         return {"da", "pe"}
     if mode == "sum_pe":
-        return {"pe", "vo"}
+        return {"vo", "pe"}
     if mode == "sum_vo_da":
         return {"vo", "da"}
     if mode == "sum_da_pe":
@@ -145,6 +142,68 @@ def _auto_skin_axes(center: opt.Card) -> set[str]:
     if mode == "sum_vo_pe":
         return {"vo", "pe"}
     return {"vo", "da", "pe"}
+
+
+def _auto_skin_candidate_rates(center: opt.Card) -> list[dict[str, float]]:
+    def axis_rates(axes: set[str], rate: float) -> dict[str, float]:
+        r = max(0.0, float(rate))
+        return {
+            "vo": r if "vo" in axes else 0.0,
+            "da": r if "da" in axes else 0.0,
+            "pe": r if "pe" in axes else 0.0,
+        }
+
+    rule = center.vs_rule
+    mode = (rule.mode if rule else "").strip()
+    if mode == "sum_vo":
+        return [axis_rates({"vo", "da"}, 0.08), axis_rates({"vo", "pe"}, 0.08)]
+    if mode == "sum_da":
+        return [axis_rates({"vo", "da"}, 0.08), axis_rates({"da", "pe"}, 0.08)]
+    if mode == "sum_pe":
+        return [axis_rates({"vo", "pe"}, 0.08), axis_rates({"da", "pe"}, 0.08)]
+    if mode == "sum_vo_da":
+        return [axis_rates({"vo", "da"}, 0.08)]
+    if mode == "sum_da_pe":
+        return [axis_rates({"da", "pe"}, 0.08)]
+    if mode == "sum_vo_pe":
+        return [axis_rates({"vo", "pe"}, 0.08)]
+    return [axis_rates({"vo", "da", "pe"}, 0.05)]
+
+
+def _skin_axis_rates_by_profile(
+    profile: str | None,
+    center: opt.Card,
+) -> dict[str, float]:
+    def axis_rates(axes: set[str], rate: float) -> dict[str, float]:
+        r = max(0.0, float(rate))
+        return {
+            "vo": r if "vo" in axes else 0.0,
+            "da": r if "da" in axes else 0.0,
+            "pe": r if "pe" in axes else 0.0,
+        }
+
+    p = str(profile or "auto").strip().lower()
+    if p in {"off", "none", "disabled"}:
+        return {"vo": 0.0, "da": 0.0, "pe": 0.0}
+
+    if p in {"single_vo", "vo", "vo_only", "vo_single"}:
+        return axis_rates({"vo"}, 0.09)
+    if p in {"single_da", "da", "da_only", "da_single"}:
+        return axis_rates({"da"}, 0.09)
+    if p in {"single_pe", "pe", "pe_only", "pe_single"}:
+        return axis_rates({"pe"}, 0.09)
+
+    if p in {"dual_vo_da", "vo_da", "voda", "vo-da"}:
+        return axis_rates({"vo", "da"}, 0.08)
+    if p in {"dual_da_pe", "da_pe", "dape", "da-pe"}:
+        return axis_rates({"da", "pe"}, 0.08)
+    if p in {"dual_vo_pe", "vo_pe", "vope", "vo-pe"}:
+        return axis_rates({"vo", "pe"}, 0.08)
+
+    if p in {"triple_all", "vo_da_pe", "all", "triple", "3axis"}:
+        return axis_rates({"vo", "da", "pe"}, 0.05)
+
+    return _auto_skin_candidate_rates(center)[0]
 
 
 def _type_bonus_total(cards: list[opt.Card], song_color: str, rate: float) -> int:
@@ -163,9 +222,10 @@ def _type_bonus_total(cards: list[opt.Card], song_color: str, rate: float) -> in
 def _office_bonus_total(cards: list[opt.Card], vo_rate: float, da_rate: float, pe_rate: float) -> int:
     total = 0
     for c in cards:
-        total += int(math.ceil(float(c.vo) * vo_rate))
-        total += int(math.ceil(float(c.da) * da_rate))
-        total += int(math.ceil(float(c.pe) * pe_rate))
+        # Office bonus follows in-game style down-rounding per axis per card.
+        total += int(math.floor(float(c.vo) * vo_rate))
+        total += int(math.floor(float(c.da) * da_rate))
+        total += int(math.floor(float(c.pe) * pe_rate))
     return int(total)
 
 
@@ -173,31 +233,143 @@ def _skin_bonus_total(
     cards: list[opt.Card],
     *,
     song_color: str,
-    rate: float,
-    axes: set[str],
+    vo_rate: float,
+    da_rate: float,
+    pe_rate: float,
     target_color_mode: str,
 ) -> int:
-    if rate <= 0.0 or not axes:
+    vo_rate = max(0.0, float(vo_rate))
+    da_rate = max(0.0, float(da_rate))
+    pe_rate = max(0.0, float(pe_rate))
+    if vo_rate <= 0.0 and da_rate <= 0.0 and pe_rate <= 0.0:
         return 0
+    target_colors = _color_set_from_target_mode(target_color_mode, song_color=song_color)
     total = 0
-    target = (target_color_mode or "song").strip().lower()
     for c in cards:
-        if target == "song":
-            if song_color != "ALL" and c.color != song_color:
-                continue
-        elif target == "all":
-            pass
-        else:
-            tc = target.upper()
-            if tc != "ALL" and c.color != tc:
-                continue
-        if "vo" in axes:
-            total += int(math.ceil(float(c.vo) * rate))
-        if "da" in axes:
-            total += int(math.ceil(float(c.da) * rate))
-        if "pe" in axes:
-            total += int(math.ceil(float(c.pe) * rate))
+        if target_colors is not None and c.color not in target_colors:
+            continue
+        if vo_rate > 0.0:
+            total += int(math.ceil(float(c.vo) * vo_rate))
+        if da_rate > 0.0:
+            total += int(math.ceil(float(c.da) * da_rate))
+        if pe_rate > 0.0:
+            total += int(math.ceil(float(c.pe) * pe_rate))
     return int(total)
+
+
+_COLOR_WORD_TO_CODE = {
+    "R": "R",
+    "B": "B",
+    "G": "G",
+    "Y": "Y",
+    "P": "P",
+    "ALL": "ALL",
+    "RED": "R",
+    "BLUE": "B",
+    "GREEN": "G",
+    "YELLOW": "Y",
+    "PURPLE": "P",
+}
+
+
+def _normalize_color_code(token: str | None) -> str | None:
+    text = str(token or "").strip().upper()
+    if not text:
+        return None
+    return _COLOR_WORD_TO_CODE.get(text)
+
+
+def _color_set_from_target_mode(target_color_mode: str, *, song_color: str) -> set[str] | None:
+    mode_raw = str(target_color_mode or "song").strip()
+    mode = mode_raw.lower()
+    if mode in {"song", ""}:
+        sc = _normalize_color_code(song_color) or "ALL"
+        return None if sc == "ALL" else {sc}
+    if mode == "all":
+        return None
+
+    tokens = re.split(r"[,+/&|・\s]+", mode_raw)
+    colors: set[str] = set()
+    for tok in tokens:
+        code = _normalize_color_code(tok)
+        if code == "ALL":
+            return None
+        if code:
+            colors.add(code)
+    if colors:
+        return colors
+
+    upper = mode_raw.upper()
+    for word in re.findall(r"(RED|BLUE|GREEN|YELLOW|PURPLE|ALL)", upper):
+        code = _normalize_color_code(word)
+        if code == "ALL":
+            return None
+        if code:
+            colors.add(code)
+    if colors:
+        return colors
+
+    sc = _normalize_color_code(song_color) or "ALL"
+    return None if sc == "ALL" else {sc}
+
+
+def _serialize_color_set(colors: set[str] | None) -> str:
+    if colors is None:
+        return "all"
+    if not colors:
+        return "song"
+    return ",".join(sorted(colors))
+
+
+def _is_valid_skin_target_mode(raw_mode: str | None) -> bool:
+    mode_raw = str(raw_mode or "").strip()
+    if not mode_raw:
+        return False
+    mode = mode_raw.lower()
+    if mode in {"song", "all"}:
+        return True
+
+    tokens = [tok for tok in re.split(r"[,+/&|・\s]+", mode_raw) if tok.strip()]
+    if not tokens:
+        return False
+    if len(tokens) > 1 and any((_normalize_color_code(tok) == "ALL") for tok in tokens):
+        return False
+    return all(_normalize_color_code(tok) is not None for tok in tokens)
+
+
+def _auto_skin_candidate_targets(center: opt.Card, cards: list[opt.Card], *, song_color: str) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(mode: str) -> None:
+        key = str(mode).strip().lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        out.append(str(mode).strip())
+
+    add("song")
+
+    source_types = sorted(
+        {
+            c
+            for c in (center.vs_rule.source_types if center.vs_rule else set())
+            if c in {"R", "B", "G", "Y", "P"}
+        }
+    )
+    if source_types:
+        if len(source_types) >= 2:
+            add(",".join(source_types[:2]))
+        for color in source_types:
+            add(color)
+
+    team_colors = sorted({c.color for c in cards if c.color in {"R", "B", "G", "Y", "P"}})
+    for color in team_colors:
+        add(color)
+    for i in range(len(team_colors)):
+        for j in range(i + 1, len(team_colors)):
+            add(f"{team_colors[i]},{team_colors[j]}")
+    return out
 
 
 def _parse_axes(raw: str | list[str] | None) -> set[str]:
@@ -212,6 +384,92 @@ def _parse_axes(raw: str | list[str] | None) -> set[str]:
         return {"auto"}
     valid = {"vo", "da", "pe"}
     return {x for x in out if x in valid}
+
+
+def _optional_rate_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        out = float(text)
+    except Exception:
+        return None
+    return max(0.0, out)
+
+
+def _resolve_skin_axis_rates(
+    payload: dict[str, Any],
+    center: opt.Card,
+    *,
+    cards: list[opt.Card] | None,
+    song_color: str,
+    skin_target: str,
+    enable_skin: bool,
+) -> tuple[dict[str, float], str]:
+    if not enable_skin:
+        return {"vo": 0.0, "da": 0.0, "pe": 0.0}, "song"
+
+    target_mode = str(skin_target or "song").strip() or "song"
+    profile_raw = payload.get("front_skin_profile")
+    if profile_raw is not None and str(profile_raw).strip():
+        profile_key = str(profile_raw).strip().lower()
+        if profile_key in {"off", "none", "disabled"}:
+            return {"vo": 0.0, "da": 0.0, "pe": 0.0}, target_mode
+
+        if profile_key in {"auto", "default"}:
+            axis_candidates = _auto_skin_candidate_rates(center)
+            target_candidates = [target_mode]
+            if target_mode.lower() in {"song", "auto"}:
+                target_candidates = _auto_skin_candidate_targets(center, cards or [], song_color=song_color)
+
+            best_rates = axis_candidates[0]
+            best_target = target_candidates[0] if target_candidates else target_mode
+            best_total = -1
+            for tgt in target_candidates:
+                for rates in axis_candidates:
+                    total = _skin_bonus_total(
+                        cards or [],
+                        song_color=song_color,
+                        vo_rate=rates["vo"],
+                        da_rate=rates["da"],
+                        pe_rate=rates["pe"],
+                        target_color_mode=tgt,
+                    )
+                    if total > best_total:
+                        best_total = total
+                        best_rates = rates
+                        best_target = tgt
+            return best_rates, best_target
+
+        return _skin_axis_rates_by_profile(profile_raw, center), target_mode
+
+    vo_rate = _optional_rate_value(payload.get("front_skin_vo_rate"))
+    da_rate = _optional_rate_value(payload.get("front_skin_da_rate"))
+    pe_rate = _optional_rate_value(payload.get("front_skin_pe_rate"))
+    if vo_rate is not None or da_rate is not None or pe_rate is not None:
+        return (
+            {
+                "vo": float(vo_rate or 0.0),
+                "da": float(da_rate or 0.0),
+                "pe": float(pe_rate or 0.0),
+            },
+            target_mode,
+        )
+
+    legacy_rate = _optional_rate_value(payload.get("front_skin_rate"))
+    legacy_skin_rate = float(legacy_rate if legacy_rate is not None else 0.08)
+    legacy_axes = _parse_axes(payload.get("front_skin_axes", ["auto"]))
+    focus_axes = _auto_skin_axes(center) if "auto" in legacy_axes else legacy_axes
+    return (
+        {
+            "vo": legacy_skin_rate if "vo" in focus_axes else 0.0,
+            "da": legacy_skin_rate if "da" in focus_axes else 0.0,
+            "pe": legacy_skin_rate if "pe" in focus_axes else 0.0,
+        },
+        target_mode,
+    )
 
 
 def _team_effect_summary(cards: list[opt.Card], center: opt.Card) -> str:
@@ -1378,7 +1636,13 @@ class ScoringEngine:
                 "enable_type_bonus": True,
                 "costume": {"enabled": True, "vo": 125, "da": 125, "pe": 125, "skill": 10},
                 "office": {"enabled": True, "vo": 0.17, "da": 0.17, "pe": 0.17},
-                "front_skin": {"enabled": True, "rate": 0.08, "axes": ["auto"], "target_color": "song"},
+                "front_skin": {
+                    "enabled": True,
+                    "profile": "auto",
+                    "rate": 0.08,
+                    "axes": ["auto"],
+                    "target_color": "song",
+                },
                 "scene_skill_per_card": 430,
                 "optimize": {
                     "top_n": 5,
@@ -1633,21 +1897,61 @@ class ScoringEngine:
             search_pool_size = max(8, int(payload.get("search_pool_size", DEFAULT_SEARCH_POOL_SIZE)))
             preselect_top_m = max(top_n, int(payload.get("preselect_top_m", DEFAULT_PRESELECT_TOP_M)))
 
+        exact_enum_limit = max(0, int(payload.get("exact_enum_candidate_limit", DEFAULT_EXACT_ENUM_CANDIDATE_LIMIT)))
+        force_exact_enum = bool(payload.get("force_exact_enum", False))
+        # Benchmark switch: disable signature dedupe (center + sorted(4 supports)).
+        # Default remains False; normal behavior unchanged.
+        disable_signature_check = bool(payload.get("disable_signature_check", False))
+
+        def _estimate_exact_candidate_count() -> int:
+            total = 0
+            n_pool = len(pool_cards)
+            if n_pool < 5:
+                return 0
+            for center in center_cards:
+                fixed_support_codes = [code for code in must_include_codes if code != center.code]
+                if len(fixed_support_codes) > 4:
+                    continue
+                need = 4 - len(fixed_support_codes)
+                if need < 0:
+                    continue
+                avail = n_pool - 1 - len(fixed_support_codes)
+                if avail < need:
+                    continue
+                total += int(math.comb(avail, need))
+            return int(total)
+
+        estimated_exact_candidates = _estimate_exact_candidate_count()
+        exact_small_pool_mode = bool(
+            force_exact_enum
+            or (
+                exact_enum_limit > 0
+                and estimated_exact_candidates > 0
+                and estimated_exact_candidates <= exact_enum_limit
+            )
+        )
+
         candidates_map: dict[tuple[str, ...], dict[str, Any]] = {}
         skipped_same_center_permutations = 0
+        candidate_seq = 0
 
         def _upsert_candidate(cards: list[opt.Card], center: opt.Card) -> None:
-            nonlocal skipped_same_center_permutations
+            nonlocal skipped_same_center_permutations, candidate_seq
             # Keep leader role in candidate identity.
             # Same 5 cards with different center (V/S swap) can yield very different
             # effective stats/skill-rate chains, so they must be evaluated separately.
-            support_codes = tuple(sorted(c.code for c in cards if c.code != center.code))
-            key = tuple([center.code, *support_codes])
-            # Center fixed + same 4 supports means equivalent team for scoring.
-            # Skip immediately to avoid re-evaluating position permutations.
-            if key in candidates_map:
-                skipped_same_center_permutations += 1
-                return
+            if disable_signature_check:
+                support_codes = tuple(c.code for c in cards if c.code != center.code)
+                key = tuple([center.code, *support_codes, f"seq:{candidate_seq}"])
+                candidate_seq += 1
+            else:
+                support_codes = tuple(sorted(c.code for c in cards if c.code != center.code))
+                key = tuple([center.code, *support_codes])
+                # Center fixed + same 4 supports means equivalent team for scoring.
+                # Skip immediately to avoid re-evaluating position permutations.
+                if key in candidates_map:
+                    skipped_same_center_permutations += 1
+                    return
             objective = float(opt._objective_value(cards, center))
             candidates_map[key] = {
                 "objective": objective,
@@ -1682,6 +1986,24 @@ class ScoringEngine:
         exact_must_mode = bool(must_include_set and len(must_include_set) >= 4)
         for center in center_cards:
             _control_tick()
+            if exact_small_pool_mode:
+                fixed_support_codes = [code for code in must_include_codes if code != center.code]
+                if len(fixed_support_codes) > 4:
+                    continue
+                fixed_supports = [self._cards_by_code[code] for code in fixed_support_codes]
+                need = 4 - len(fixed_supports)
+                if need < 0:
+                    continue
+                if need == 0:
+                    _upsert_candidate([center, *fixed_supports], center)
+                    continue
+                used_codes = {center.code, *fixed_support_codes}
+                free_pool = [c for c in pool_cards if c.code not in used_codes]
+                for extras in itertools.combinations(free_pool, need):
+                    _control_tick()
+                    _upsert_candidate([center, *fixed_supports, *list(extras)], center)
+                continue
+
             if exact_must_mode:
                 _enumerate_must_candidates(center)
                 continue
@@ -1736,7 +2058,9 @@ class ScoringEngine:
             raise ValueError("no candidate teams matched current constraints")
         t_build_end = time.perf_counter()
 
-        if bool(payload.get("preselect_all", False)):
+        if exact_small_pool_mode:
+            preselect_top_m = len(candidates_map)
+        elif bool(payload.get("preselect_all", False)):
             preselect_top_m = len(candidates_map)
         elif constrained_must_mode:
             # Keep a wider preselection under hard constraints to avoid dropping
@@ -1773,8 +2097,12 @@ class ScoringEngine:
             "office_da": float(payload.get("office_da", 0.17)),
             "office_pe": float(payload.get("office_pe", 0.17)),
             "enable_skin": bool(payload.get("enable_skin", True)),
+            "front_skin_profile": str(payload.get("front_skin_profile", "auto")),
             "front_skin_rate": float(payload.get("front_skin_rate", 0.08)),
             "front_skin_axes": payload.get("front_skin_axes", ["auto"]),
+            "front_skin_vo_rate": payload.get("front_skin_vo_rate"),
+            "front_skin_da_rate": payload.get("front_skin_da_rate"),
+            "front_skin_pe_rate": payload.get("front_skin_pe_rate"),
             "front_skin_target_color": str(payload.get("front_skin_target_color", "song")),
             "enable_type_bonus": bool(payload.get("enable_type_bonus", True)),
             "type_bonus_rate": float(payload.get("type_bonus_rate", 0.30)),
@@ -1831,7 +2159,12 @@ class ScoringEngine:
                 ),
                 reverse=True,
             )
-            requested_refine = final_eval_count if final_eval_count > 0 else top_n
+            if final_eval_count > 0:
+                requested_refine = final_eval_count
+            elif exact_small_pool_mode:
+                requested_refine = max(top_n * 8, 80)
+            else:
+                requested_refine = top_n
             refine_count = min(len(teams), max(top_n, requested_refine))
             refined_count_actual = int(refine_count)
             refined: list[dict[str, Any]] = []
@@ -1859,7 +2192,32 @@ class ScoringEngine:
             ),
             reverse=True,
         )
-        teams = teams[:top_n]
+        # Hard guard at output stage:
+        # for the same center, identical 4-support set is equivalent and should
+        # never occupy multiple Top slots.
+        output_dedup_skipped = 0
+        if disable_signature_check:
+            teams = teams[:top_n]
+        else:
+            unique_teams: list[dict[str, Any]] = []
+            seen_output_keys: set[tuple[str, ...]] = set()
+            for row in teams:
+                team_codes = [str(x).strip() for x in row.get("team_codes", []) if str(x).strip()]
+                center_code = str(
+                    ((row.get("team") or {}).get("center") or {}).get("code")
+                    or (team_codes[0] if team_codes else "")
+                ).strip()
+                if center_code:
+                    supports = tuple(sorted(code for code in team_codes if code != center_code))
+                    key = (center_code, *supports)
+                else:
+                    key = tuple(team_codes)
+                if key in seen_output_keys:
+                    output_dedup_skipped += 1
+                    continue
+                seen_output_keys.add(key)
+                unique_teams.append(row)
+            teams = unique_teams[:top_n]
 
         out = {
             "meta": {
@@ -1886,8 +2244,15 @@ class ScoringEngine:
                     "disable_fast_all": disable_fast_all,
                     "candidate_strategy": candidate_strategy,
                     "preselect_all": bool(payload.get("preselect_all", False)),
+                    "preselect_all_effective": bool(exact_small_pool_mode or payload.get("preselect_all", False)),
                     "must_include_seeded": bool(must_include_set),
                     "skipped_same_center_permutations": skipped_same_center_permutations,
+                    "output_dedup_skipped": output_dedup_skipped,
+                    "disable_signature_check": disable_signature_check,
+                    "exact_small_pool_mode": exact_small_pool_mode,
+                    "force_exact_enum": force_exact_enum,
+                    "exact_enum_candidate_limit": exact_enum_limit,
+                    "estimated_exact_candidates": estimated_exact_candidates,
                     "trials_fast": trials_fast,
                     "trials_full": trials_full,
                     "pre_eval_trials": pre_eval_trials,
@@ -1968,10 +2333,8 @@ class ScoringEngine:
         office_pe = float(payload.get("office_pe", 0.17)) if enable_office else 0.0
 
         enable_skin = bool(payload.get("enable_skin", True))
-        skin_rate = float(payload.get("front_skin_rate", 0.08)) if enable_skin else 0.0
-        skin_axes = _parse_axes(payload.get("front_skin_axes", ["auto"]))
-        skin_target = str(payload.get("front_skin_target_color", "song")).strip().lower() if enable_skin else "song"
-        if skin_target.upper() not in VALID_COLORS and skin_target not in {"song", "all"}:
+        skin_target = str(payload.get("front_skin_target_color", "song")).strip() if enable_skin else "song"
+        if enable_skin and not _is_valid_skin_target_mode(skin_target):
             skin_target = "song"
 
         enable_type_bonus = bool(payload.get("enable_type_bonus", True))
@@ -2031,13 +2394,21 @@ class ScoringEngine:
 
         results: list[dict[str, Any]] = []
         for idx, song in enumerate(songs):
-            focus_axes = _auto_skin_axes(center) if "auto" in skin_axes else skin_axes
+            skin_rates, skin_target_resolved = _resolve_skin_axis_rates(
+                payload,
+                center,
+                cards=cards,
+                song_color=str(song["color"]),
+                skin_target=skin_target,
+                enable_skin=enable_skin,
+            )
             skin_total = _skin_bonus_total(
                 cards,
                 song_color=str(song["color"]),
-                rate=skin_rate,
-                axes=focus_axes,
-                target_color_mode=skin_target,
+                vo_rate=skin_rates["vo"],
+                da_rate=skin_rates["da"],
+                pe_rate=skin_rates["pe"],
+                target_color_mode=skin_target_resolved,
             )
             front_pre = int(team_power_scene + member_point_total + costume_total + office_total + skin_total + skill_total)
             type_bonus = _type_bonus_total(cards, str(song["color"]), type_bonus_rate)
@@ -2148,6 +2519,13 @@ class ScoringEngine:
                     "costume_total": costume_total,
                     "office_total": office_total,
                     "skin_total": skin_total,
+                    "skin_vo_rate": round(float(skin_rates.get("vo", 0.0)), 4),
+                    "skin_da_rate": round(float(skin_rates.get("da", 0.0)), 4),
+                    "skin_pe_rate": round(float(skin_rates.get("pe", 0.0)), 4),
+                    "skin_target_mode": skin_target_resolved,
+                    "skin_target_colors": _serialize_color_set(
+                        _color_set_from_target_mode(skin_target_resolved, song_color=str(song["color"]))
+                    ),
                     "type_bonus_total": type_bonus,
                     "skill_stat_total": skill_total,
                 },

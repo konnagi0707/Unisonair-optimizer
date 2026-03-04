@@ -10,7 +10,7 @@
     />
     <link rel="preconnect" href="https://cdn-assets.unis-on-air.com" crossorigin />
     <link rel="preconnect" href="https://uniair-api.kosa3.com" crossorigin />
-    <link rel="stylesheet" href="/static/styles.css?v=20260303_104" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260304_118" />
   </head>
   <body>
     <div class="bg-orb orb-a"></div>
@@ -65,6 +65,92 @@
               <summary>成员筛选</summary>
               <div class="filter-fold-body">
                 <div id="memberPicker" class="member-picker"></div>
+              </div>
+            </details>
+
+            <details class="filter-fold" open>
+              <summary>其他设置</summary>
+              <div class="filter-fold-body other-settings-body">
+                <div class="other-settings-stack">
+                  <section class="other-setting-card">
+                    <div class="other-setting-head">
+                      <h3>衣服加成</h3>
+                    </div>
+                    <div class="other-setting-grid">
+                      <div class="other-field other-field-num">
+                        <label for="costumeVo">Vo 固定值</label>
+                        <input id="costumeVo" type="number" min="0" step="1" value="125" />
+                      </div>
+                      <div class="other-field other-field-num">
+                        <label for="costumeDa">Da 固定值</label>
+                        <input id="costumeDa" type="number" min="0" step="1" value="125" />
+                      </div>
+                      <div class="other-field other-field-num">
+                        <label for="costumePe">Pe 固定值</label>
+                        <input id="costumePe" type="number" min="0" step="1" value="125" />
+                      </div>
+                      <div class="other-field other-field-num">
+                        <label for="costumeSkillPerCard">衣服技能分/每卡</label>
+                        <input id="costumeSkillPerCard" type="number" min="0" step="1" value="10" />
+                      </div>
+                      <div class="other-field other-field-num">
+                        <label for="sceneSkillPerCard">场景技能分/每卡</label>
+                        <input id="sceneSkillPerCard" type="number" min="0" step="1" value="430" />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="other-setting-card">
+                    <div class="other-setting-head">
+                      <h3>家具加成</h3>
+                    </div>
+                    <div class="other-setting-grid">
+                      <div class="other-field other-field-rate">
+                        <label for="officeVo">Vo 比例</label>
+                        <input id="officeVo" type="number" min="0" step="0.01" value="0.17" />
+                      </div>
+                      <div class="other-field other-field-rate">
+                        <label for="officeDa">Da 比例</label>
+                        <input id="officeDa" type="number" min="0" step="0.01" value="0.17" />
+                      </div>
+                      <div class="other-field other-field-rate">
+                        <label for="officePe">Pe 比例</label>
+                        <input id="officePe" type="number" min="0" step="0.01" value="0.17" />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="other-setting-card">
+                    <div class="other-setting-head">
+                      <h3>Skin 加成</h3>
+                    </div>
+                    <div class="other-setting-grid">
+                      <div class="other-field other-field-select">
+                        <label for="skinEnabled">应用皮肤</label>
+                        <select id="skinEnabled">
+                          <option value="on" selected>应用</option>
+                          <option value="off">不应用</option>
+                        </select>
+                      </div>
+                      <div class="other-field other-field-select">
+                        <label for="skinMode">皮肤类型</label>
+                        <select id="skinMode">
+                          <option value="auto" selected>自动（按队长轴向；单轴队长按双偏择优）</option>
+                          <option value="single_vo">Voが9%アップ</option>
+                          <option value="single_da">Daが9%アップ</option>
+                          <option value="single_pe">Peが9%アップ</option>
+                          <option value="dual_vo_da">Vo、Daが8%アップ</option>
+                          <option value="dual_da_pe">Da、Peが8%アップ</option>
+                          <option value="dual_vo_pe">Vo、Peが8%アップ</option>
+                          <option value="triple_all">Vo、Da、Peが5%アップ</option>
+                        </select>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <p class="card-meta other-settings-note">
+                  手动可选：Vo/Da/Pe 单偏 9%，双偏各 8%，三偏各 5%。自动模式会结合队长轴向与前排颜色组合择优（含 V 卡复色场景）。
+                </p>
               </div>
             </details>
           </aside>
@@ -404,6 +490,6 @@
       <span class="back-to-top-text">顶部</span>
     </button>
 
-    <script src="/static/app.js?v=20260303_105"></script>
+    <script src="/static/app.js?v=20260304_118"></script>
   </body>
 </html>

@@ -178,6 +178,16 @@ function buildUiStateSnapshot() {
     sortBy: $("sortBy")?.value || "",
     optTopN: $("optTopN")?.value || "",
     optPoolScope: $("optPoolScope")?.value || "owned",
+    costumeVo: $("costumeVo")?.value || "",
+    costumeDa: $("costumeDa")?.value || "",
+    costumePe: $("costumePe")?.value || "",
+    costumeSkillPerCard: $("costumeSkillPerCard")?.value || "",
+    sceneSkillPerCard: $("sceneSkillPerCard")?.value || "",
+    officeVo: $("officeVo")?.value || "",
+    officeDa: $("officeDa")?.value || "",
+    officePe: $("officePe")?.value || "",
+    skinEnabled: $("skinEnabled")?.value || "on",
+    skinMode: $("skinMode")?.value || "auto",
     cardListScope: $("cardListScope")?.value || "all",
     qSearch: $("qSearch")?.value || "",
     selectedMembers: [...state.selectedMembers],
@@ -372,6 +382,28 @@ function applyPersistedUiState(snapshot) {
     if (Number.isFinite(optTopN) && optTopN >= 1) {
       const optTopNEl = $("optTopN");
       if (optTopNEl) optTopNEl.value = String(Math.min(30, optTopN));
+    }
+    const applyInputValue = (id, value) => {
+      if (value === null || value === undefined) return;
+      const el = $(id);
+      if (!el) return;
+      el.value = String(value);
+    };
+    applyInputValue("costumeVo", snapshot.costumeVo);
+    applyInputValue("costumeDa", snapshot.costumeDa);
+    applyInputValue("costumePe", snapshot.costumePe);
+    applyInputValue("costumeSkillPerCard", snapshot.costumeSkillPerCard);
+    applyInputValue("sceneSkillPerCard", snapshot.sceneSkillPerCard);
+    applyInputValue("officeVo", snapshot.officeVo);
+    applyInputValue("officeDa", snapshot.officeDa);
+    applyInputValue("officePe", snapshot.officePe);
+    const skinEnabledEl = $("skinEnabled");
+    if (skinEnabledEl && snapshot.skinEnabled !== undefined) {
+      skinEnabledEl.value = normalizeSkinEnabled(snapshot.skinEnabled, skinEnabledEl.value || "on");
+    }
+    const skinModeEl = $("skinMode");
+    if (skinModeEl && snapshot.skinMode !== undefined) {
+      skinModeEl.value = normalizeSkinMode(snapshot.skinMode, skinModeEl.value || "auto");
     }
     const qSearchEl = $("qSearch");
     if (qSearchEl) qSearchEl.value = String(snapshot.qSearch || "");
@@ -688,6 +720,10 @@ function buildProfileSaveSummary(name, beforeProfile, afterProfile) {
   return `已保存账号「${name}」：${parts.join("；")}。`;
 }
 
+function buildProfileAutoSaveSummary(name, beforeProfile, afterProfile) {
+  return buildProfileSaveSummary(name, beforeProfile, afterProfile).replace(/^已保存账号/, "已自动保存账号");
+}
+
 async function fetchProfilesFromServer() {
   const resp = await fetch("/api/profiles");
   const data = await resp.json();
@@ -893,10 +929,11 @@ async function flushActiveProfileAutoSave() {
   }
   profileAutoSaveInFlight = true;
   try {
+    const beforeProfile = cloneProfileSnapshot(state.profiles[name]);
     const saved = await saveProfileToServer(name, snapshot);
     state.profiles[name] = saved;
     if (state.activeProfile === name) {
-      setProfileHint(`账号「${name}」已自动保存。`);
+      setProfileHint(buildProfileAutoSaveSummary(name, beforeProfile, saved));
     }
     schedulePersistUiState();
   } catch (err) {
@@ -1200,6 +1237,147 @@ function parseAxes(raw) {
     .filter(Boolean);
 }
 
+function normalizeSkinMode(raw, fallback = "auto") {
+  const map = {
+    auto: "auto",
+
+    single_vo: "single_vo",
+    vo: "single_vo",
+    vo_only: "single_vo",
+    vo_single: "single_vo",
+
+    single_da: "single_da",
+    da: "single_da",
+    da_only: "single_da",
+    da_single: "single_da",
+
+    single_pe: "single_pe",
+    pe: "single_pe",
+    pe_only: "single_pe",
+    pe_single: "single_pe",
+
+    dual_vo_da: "dual_vo_da",
+    vo_da: "dual_vo_da",
+    voda: "dual_vo_da",
+    "vo-da": "dual_vo_da",
+
+    dual_da_pe: "dual_da_pe",
+    da_pe: "dual_da_pe",
+    dape: "dual_da_pe",
+    "da-pe": "dual_da_pe",
+
+    dual_vo_pe: "dual_vo_pe",
+    vo_pe: "dual_vo_pe",
+    vope: "dual_vo_pe",
+    "vo-pe": "dual_vo_pe",
+
+    triple_all: "triple_all",
+    vo_da_pe: "triple_all",
+    all: "triple_all",
+    triple: "triple_all",
+    "3axis": "triple_all",
+  };
+  const val = String(raw || "").trim().toLowerCase();
+  if (map[val]) return map[val];
+  const fb = String(fallback || "").trim().toLowerCase();
+  return map[fb] || "auto";
+}
+
+function normalizeSkinEnabled(raw, fallback = "on") {
+  const val = String(raw || "").trim().toLowerCase();
+  if (val === "on" || val === "off") return val;
+  return fallback;
+}
+
+function formatRatePct(rate) {
+  const n = Number(rate || 0);
+  const pct = n * 100;
+  if (!Number.isFinite(pct)) return "0%";
+  return Math.abs(pct - Math.round(pct)) < 0.001 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
+}
+
+function inferSkinProfileFromRates(voRate, daRate, peRate) {
+  const vo = Number(voRate || 0);
+  const da = Number(daRate || 0);
+  const pe = Number(peRate || 0);
+  const near = (a, b) => Math.abs(a - b) < 0.0001;
+  const active = [vo > 0.0001, da > 0.0001, pe > 0.0001].filter(Boolean).length;
+  if (active === 0) return "off";
+  if (near(vo, 0.09) && da < 0.0001 && pe < 0.0001) return "single_vo";
+  if (near(da, 0.09) && vo < 0.0001 && pe < 0.0001) return "single_da";
+  if (near(pe, 0.09) && vo < 0.0001 && da < 0.0001) return "single_pe";
+  if (near(vo, 0.08) && near(da, 0.08) && pe < 0.0001) return "dual_vo_da";
+  if (near(da, 0.08) && near(pe, 0.08) && vo < 0.0001) return "dual_da_pe";
+  if (near(vo, 0.08) && near(pe, 0.08) && da < 0.0001) return "dual_vo_pe";
+  if (near(vo, 0.05) && near(da, 0.05) && near(pe, 0.05)) return "triple_all";
+  return "custom";
+}
+
+function skinProfileLabel(profileKey) {
+  const key = String(profileKey || "").trim().toLowerCase();
+  if (key === "off") return "关闭";
+  if (key === "auto") return "自动";
+  if (key === "single_vo") return "Voが9%アップ";
+  if (key === "single_da") return "Daが9%アップ";
+  if (key === "single_pe") return "Peが9%アップ";
+  if (key === "dual_vo_da") return "Vo・Daが8%アップ";
+  if (key === "dual_da_pe") return "Da・Peが8%アップ";
+  if (key === "dual_vo_pe") return "Vo・Peが8%アップ";
+  if (key === "triple_all") return "Vo・Da・Peが5%アップ";
+  if (key === "custom") return "自定义";
+  return key || "-";
+}
+
+function skinTargetColorsLabel(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "-";
+  const vals = text
+    .split(",")
+    .map((x) => String(x || "").trim().toUpperCase())
+    .filter(Boolean);
+  if (!vals.length) return text;
+  return vals
+    .map((c) => {
+      if (c === "ALL") return "ALL";
+      return COLOR_LONG[c] || c;
+    })
+    .join(" / ");
+}
+
+function buildFrontSkinSummaryText(bonuses, selectedProfileRaw) {
+  const b = bonuses || {};
+  const vo = Number(b.skin_vo_rate || 0);
+  const da = Number(b.skin_da_rate || 0);
+  const pe = Number(b.skin_pe_rate || 0);
+  const total = Number(b.skin_total || 0);
+  const inferred = inferSkinProfileFromRates(vo, da, pe);
+  const raw = String(selectedProfileRaw || "").trim().toLowerCase();
+  let selected = "";
+  if (["off", "none", "disabled"].includes(raw)) {
+    selected = "off";
+  } else if (raw) {
+    selected = normalizeSkinMode(raw, "auto");
+  } else {
+    selected = inferred;
+  }
+  if (inferred === "off" && total <= 0) {
+    selected = "off";
+  }
+  const modeText =
+    selected === "auto" && inferred && inferred !== "auto" && inferred !== "off" && inferred !== "custom"
+      ? `${skinProfileLabel(selected)}（当前 ${skinProfileLabel(inferred)}）`
+      : skinProfileLabel(selected || inferred);
+  if ((vo <= 0 && da <= 0 && pe <= 0) || selected === "off") {
+    return `${modeText} · Skin合计 ${nfmt(total)}`;
+  }
+  const axis = [];
+  if (vo > 0) axis.push(`Vo ${formatRatePct(vo)}`);
+  if (da > 0) axis.push(`Da ${formatRatePct(da)}`);
+  if (pe > 0) axis.push(`Pe ${formatRatePct(pe)}`);
+  const target = skinTargetColorsLabel(b.skin_target_colors || b.skin_target_mode || "");
+  return `${modeText} · ${axis.join(" / ")} · 生效颜色 ${target} · Skin合计 ${nfmt(total)}`;
+}
+
 function getCardByCode(code) {
   const key = String(code || "").trim();
   if (!key) return null;
@@ -1268,18 +1446,26 @@ function stripGameTags(text) {
 
 function syncWorkspacePanelHeight() {
   const leftPanel = document.querySelector(".workspace-shell .workspace-left");
+  const rightCol = document.querySelector(".workspace-shell .workspace-right");
   const rightPanel = document.querySelector(".workspace-shell .workspace-right-panel");
-  if (!leftPanel || !rightPanel) return;
+  if (!leftPanel || !rightCol || !rightPanel) return;
 
   // In stacked layout, keep natural flow and avoid forcing fixed heights.
   if (window.matchMedia("(max-width: 1180px)").matches) {
+    rightCol.style.height = "";
+    rightCol.style.maxHeight = "";
     rightPanel.style.height = "";
+    rightPanel.style.maxHeight = "";
     return;
   }
 
   const leftHeight = Math.ceil(leftPanel.getBoundingClientRect().height);
   if (!Number.isFinite(leftHeight) || leftHeight <= 0) return;
-  rightPanel.style.height = `${leftHeight}px`;
+  const heightPx = `${leftHeight}px`;
+  rightCol.style.height = heightPx;
+  rightCol.style.maxHeight = heightPx;
+  rightPanel.style.height = heightPx;
+  rightPanel.style.maxHeight = heightPx;
 }
 
 function scheduleWorkspacePanelHeightSync() {
@@ -2514,22 +2700,38 @@ function getMemberPointsPayload() {
 }
 
 function getCommonOptionPayload() {
-  const readChecked = (id, fallback) => {
-    const el = $(id);
-    return el ? Boolean(el.checked) : Boolean(fallback);
-  };
   const readInt = (id, fallback) => {
     const el = $(id);
-    return el ? parseInt(String(el.value || fallback), 10) || fallback : fallback;
+    if (!el) return fallback;
+    const raw = String(el.value ?? "").trim();
+    if (!raw) return fallback;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
   };
   const readFloat = (id, fallback) => {
     const el = $(id);
-    return el ? parseFloat(String(el.value || fallback)) || fallback : fallback;
+    if (!el) return fallback;
+    const raw = String(el.value ?? "").trim();
+    if (!raw) return fallback;
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
   };
   const readStr = (id, fallback) => {
     const el = $(id);
     return el ? String(el.value || fallback) : String(fallback);
   };
+  const defaultFrontSkinRate = (() => {
+    const raw = Number(state.defaults?.front_skin?.rate ?? 0.08);
+    return Number.isFinite(raw) ? raw : 0.08;
+  })();
+  const defaultFrontSkinAxes = (() => {
+    const axes = state.defaults?.front_skin?.axes;
+    if (Array.isArray(axes) && axes.length) return axes;
+    return ["auto"];
+  })();
+  const defaultFrontSkinProfile = normalizeSkinMode(state.defaults?.front_skin?.profile, "auto");
+  const skinEnabled = normalizeSkinEnabled(readStr("skinEnabled", "on"), "on") === "on";
+  const skinMode = normalizeSkinMode(readStr("skinMode", defaultFrontSkinProfile), defaultFrontSkinProfile);
 
   return {
     mode: $("mode").value,
@@ -2542,25 +2744,29 @@ function getCommonOptionPayload() {
     member_points: getMemberPointsPayload(),
     sort_by: $("sortBy").value,
 
-    enable_costume: readChecked("enableCostume", true),
+    enable_costume: true,
     costume_vo: readInt("costumeVo", 125),
     costume_da: readInt("costumeDa", 125),
     costume_pe: readInt("costumePe", 125),
-    costume_skill_per_card: 10,
-    scene_skill_per_card: 430,
+    costume_skill_per_card: readInt("costumeSkillPerCard", 10),
+    scene_skill_per_card: readInt("sceneSkillPerCard", 430),
 
-    enable_office: readChecked("enableOffice", true),
+    enable_office: true,
     office_vo: readFloat("officeVo", 0.17),
     office_da: readFloat("officeDa", 0.17),
     office_pe: readFloat("officePe", 0.17),
 
-    enable_skin: readChecked("enableSkin", true),
-    front_skin_rate: readFloat("skinRate", 0.08),
-    front_skin_axes: parseAxes(readStr("skinAxes", "auto")),
-    front_skin_target_color: readStr("skinTarget", "song"),
+    enable_skin: skinEnabled,
+    front_skin_profile: skinEnabled ? skinMode : "off",
+    front_skin_vo_rate: null,
+    front_skin_da_rate: null,
+    front_skin_pe_rate: null,
+    front_skin_rate: defaultFrontSkinRate,
+    front_skin_axes: parseAxes(defaultFrontSkinAxes),
+    front_skin_target_color: "song",
 
-    enable_type_bonus: readChecked("enableTypeBonus", true),
-    type_bonus_rate: readFloat("typeBonusRate", 0.30),
+    enable_type_bonus: true,
+    type_bonus_rate: 0.30,
   };
 }
 
@@ -2764,7 +2970,7 @@ function renderSingle(result, meta) {
       <h3>综合力拆分</h3>
       <table>
         <tr><th>进歌前综合力(含office)</th><td class="mono">${nfmt(result.front_pre)}</td></tr>
-        <tr><th>进歌后综合力(含类型加成)</th><td class="mono">${nfmt(result.front_post)}</td></tr>
+        <tr><th>进歌后综合力</th><td class="mono">${nfmt(result.front_post)}</td></tr>
         <tr><th>Scene raw (Vo/Da/Pe)</th><td class="mono">${nfmt(scene.raw.vo)} / ${nfmt(scene.raw.da)} / ${nfmt(scene.raw.pe)}</td></tr>
         <tr><th>Scene effective (Vo/Da/Pe)</th><td class="mono">${nfmt(scene.effective.vo)} / ${nfmt(scene.effective.da)} / ${nfmt(scene.effective.pe)}</td></tr>
         <tr><th>Center delta (Vo/Da/Pe)</th><td class="mono">${nfmt(scene.delta.vo)} / ${nfmt(scene.delta.da)} / ${nfmt(scene.delta.pe)}</td></tr>
@@ -2772,7 +2978,6 @@ function renderSingle(result, meta) {
         <tr><th>衣服合计</th><td class="mono">${nfmt(bonuses.costume_total)}</td></tr>
         <tr><th>家具合计</th><td class="mono">${nfmt(bonuses.office_total)}</td></tr>
         <tr><th>Skin 合计</th><td class="mono">${nfmt(bonuses.skin_total)}</td></tr>
-        <tr><th>同色类型加成</th><td class="mono">${nfmt(bonuses.type_bonus_total)}</td></tr>
         <tr><th>成员分明细(卡分+成员分)</th><td>${memberPointSummaryHTML(memberRows)}</td></tr>
       </table>
     </div>
@@ -2843,6 +3048,31 @@ function renderMulti(results, meta) {
   `;
 }
 
+function orderTeamCardsForGameLayout(cards, centerCode) {
+  const list = Array.isArray(cards) ? cards.filter(Boolean) : [];
+  if (list.length !== 5) return list;
+  const centerKey = String(centerCode || "").trim();
+  const centerIdx = list.findIndex((c) => String(c?.code || c?.card_code || "").trim() === centerKey);
+  if (centerIdx < 0) return list;
+  const centerCard = list[centerIdx];
+  const supports = list.filter((_, i) => i !== centerIdx);
+  if (!centerCard || supports.length !== 4) return list;
+  // Game-like slot layout: [member, member, center, member, member]
+  return [supports[0], supports[1], centerCard, supports[2], supports[3]];
+}
+
+function isCenterCardCode(card, centerCode) {
+  const centerKey = String(centerCode || "").trim();
+  const cardCode = String(card?.code || card?.card_code || "").trim();
+  return Boolean(centerKey && cardCode && cardCode === centerKey);
+}
+
+function formatTeamCardLabel(card, centerCode) {
+  if (!card) return "-";
+  const name = `${String(card.member_name || "-")}[${String(card.title || "-")}]`;
+  return isCenterCardCode(card, centerCode) ? `[Center] ${name}` : name;
+}
+
 function renderOptimize(data) {
   const teams = data.teams || [];
   const meta = data.meta || {};
@@ -2899,17 +3129,23 @@ function renderOptimize(data) {
       const dist = result.distribution || {};
       const order = meta.distribution_order || distOrder;
       const center = t.team?.center || cards[0] || {};
+      const centerCode = String(center.code || center.card_code || "").trim();
+      const orderedCards = orderTeamCardsForGameLayout(cards, centerCode);
       const skills = result.skill_profiles || [];
       const memberBreakdown = result.member_point_breakdown || [];
       const memberBreakdownByCode = new Map(
         memberBreakdown.map((r) => [String(r.code || ""), r]).filter((x) => x[0])
       );
       const cardsByCode = new Map(cards.map((c) => [String(c.code || ""), c]).filter((x) => x[0]));
-      const cardStrip = cards
+      const slotIndexByCode = new Map(cards.map((c, i) => [String(c.code || ""), i]).filter((x) => x[0]));
+      const cardStrip = orderedCards
         .map(
-          (c, slotIdx) => {
+          (c, displaySlotIdx) => {
+            const codeKey = String(c.code || "");
+            const slotIdx = slotIndexByCode.has(codeKey) ? Number(slotIndexByCode.get(codeKey)) : displaySlotIdx;
             const row = memberBreakdownByCode.get(String(c.code || "")) || {};
             const displayCard = getCardByCode(c.code) || c;
+            const isCenter = isCenterCardCode(c, centerCode);
             const cardPointRaw = Number(row.scene_card_total ?? row.scene_raw_total);
             const cardPointByCard = Number(getSceneCardTotal(displayCard) || 0);
             const cardPoint = cardPointByCard > 0 ? cardPointByCard : Number.isFinite(cardPointRaw) ? cardPointRaw : 0;
@@ -2933,7 +3169,10 @@ function renderOptimize(data) {
             >${cardAvatarHTML(c, "sm")}</button>
             <div class="replace-slot-body">
               <div class="replace-slot-head">
-                <span class="replace-slot-name mini-name">${escHtml(c.member_name || "-")}</span>
+                <div class="replace-slot-name-wrap">
+                  ${isCenter ? '<span class="meta-chip center-chip" title="队长">Center</span>' : ""}
+                  <span class="replace-slot-name mini-name">${escHtml(c.member_name || "-")}</span>
+                </div>
               <button
                 class="replace-owned-btn mini-owned-btn ${state.ownedCodes.has(c.code) ? "active" : ""}"
                 type="button"
@@ -3007,10 +3246,14 @@ function renderOptimize(data) {
         : `<div class="front-line card-meta">无技能明细</div>`;
       const scene = result.scene_power || {};
       const bonuses = result.bonuses || {};
+      const skinSummary = buildFrontSkinSummaryText(
+        bonuses,
+        state.lastOptimizePayload?.front_skin_profile || ""
+      );
       return `
       <div class="result-card">
         <h3>Top${idx + 1}: ${center.member_name || "-"}[${center.title || "-"}]</h3>
-        <p class="card-meta">队伍: ${(cards || []).map((c) => `${c.member_name}[${c.title}]`).join(" / ")}</p>
+        <p class="card-meta">队伍: ${(orderedCards || []).map((c) => formatTeamCardLabel(c, centerCode)).join(" / ")}</p>
         <div class="mini-strip">${cardStrip}</div>
         <div class="opt-zawa-wrap">
           <div class="opt-front-block">
@@ -3021,6 +3264,7 @@ function renderOptimize(data) {
               <tr><th>σ</th><td class="mono">${nfmt(result.sigma)}</td></tr>
               <tr><th>发动效果</th><td>${formatGameText(result.effect_summary || "-")}</td></tr>
               <tr><th>Front 编成</th><td><div class="front-lines">${frontLines}</div></td></tr>
+              <tr><th>Front Skin</th><td>${escHtml(skinSummary)}</td></tr>
             </table>
           </div>
           <div class="opt-dist-block">
@@ -3055,9 +3299,7 @@ function renderOptimize(data) {
               )} / Pe ${nfmt(scene.delta?.pe || 0)}</td></tr>
               <tr><th>加成合计</th><td class="mono">成员分 ${nfmt(bonuses.member_point_total || 0)} / 衣服 ${nfmt(
                 bonuses.costume_total || 0
-              )} / 家具 ${nfmt(bonuses.office_total || 0)} / Skin ${nfmt(bonuses.skin_total || 0)} / 同色 ${nfmt(
-                bonuses.type_bonus_total || 0
-              )}</td></tr>
+              )} / 家具 ${nfmt(bonuses.office_total || 0)} / Skin ${nfmt(bonuses.skin_total || 0)}</td></tr>
             </table>
             <div class="opt-member-wrap">
               <h4>成员分明细（卡面分 + 成员分）</h4>
@@ -3251,6 +3493,10 @@ function buildTeamReplaceBasePayload(team) {
     "office_da",
     "office_pe",
     "enable_skin",
+    "front_skin_profile",
+    "front_skin_vo_rate",
+    "front_skin_da_rate",
+    "front_skin_pe_rate",
     "front_skin_rate",
     "front_skin_axes",
     "front_skin_target_color",
@@ -3649,14 +3895,32 @@ function renderTeamReplaceModal() {
   if (!teamCardsWrap || !hint || !searchInput || !scopeSel || !ownFilterSel || !listWrap || !countNode) return;
 
   const baseCards = ctx.currentCodes.map((code) => getCardByCode(code) || (team?.team?.cards || []).find((x) => x.code === code));
+  const centerCode = String(team?.team?.center?.code || ctx.baseCodes?.[0] || "").trim();
+  const orderedBaseCards = orderTeamCardsForGameLayout(baseCards, centerCode);
+  const slotIndexByCode = new Map(
+    baseCards
+      .map((card, idx) => [String(card?.code || "").trim(), idx])
+      .filter((x) => x[0])
+  );
+  const displayPositionBySlotIndex = new Map();
+  orderedBaseCards.forEach((card, displayIdx) => {
+    const code = String(card?.code || "").trim();
+    if (!code) return;
+    const slotIdx = slotIndexByCode.has(code) ? Number(slotIndexByCode.get(code)) : displayIdx;
+    displayPositionBySlotIndex.set(slotIdx, displayIdx + 1);
+  });
+  const centerSlotIndex = slotIndexByCode.has(centerCode) ? Number(slotIndexByCode.get(centerCode)) : -1;
   const replaceBreakdown = Array.isArray(team?.result?.member_point_breakdown) ? team.result.member_point_breakdown : [];
   const replaceBreakdownByCode = new Map(
     replaceBreakdown.map((r) => [String(r?.code || ""), r]).filter((x) => x[0])
   );
-  teamCardsWrap.innerHTML = baseCards
-    .map((card, idx) => {
+  teamCardsWrap.innerHTML = orderedBaseCards
+    .map((card, displayIdx) => {
       const code = String(card?.code || "");
-      const active = idx === ctx.slotIndex ? "active" : "";
+      const slotIdx = slotIndexByCode.has(code) ? Number(slotIndexByCode.get(code)) : displayIdx;
+      const active = slotIdx === ctx.slotIndex ? "active" : "";
+      const isCenter = isCenterCardCode(card, centerCode);
+      const slotLabel = isCenter ? "Center位（中间）" : `第${displayIdx + 1}位`;
       const detail = replaceBreakdownByCode.get(code) || {};
       const displayCard = (code ? getCardByCode(code) : null) || card || {};
       const cardPointRaw = Number(detail.scene_card_total ?? detail.scene_raw_total);
@@ -3673,13 +3937,14 @@ function renderTeamReplaceModal() {
       const owned = Boolean(code && state.ownedCodes.has(code));
       const typeRow = displayCard ? typePillsHTML(displayCard) : `<span class="type-pill P">PURPLE</span>`;
       return `
-        <article class="replace-slot-card ${active}" data-replace-pick-slot="${idx}" role="button" tabindex="0" aria-label="选择第${
-          idx + 1
-        }位替换卡槽">
+        <article class="replace-slot-card ${active}" data-replace-pick-slot="${slotIdx}" role="button" tabindex="0" aria-label="选择${slotLabel}替换卡槽">
           ${cardAvatarHTML(displayCard, "sm")}
           <div class="replace-slot-body">
             <div class="replace-slot-head">
-              <div class="replace-slot-name">${escHtml(displayCard?.member_name || card?.member_name || code || `#${idx + 1}`)}</div>
+              <div class="replace-slot-name-wrap">
+                ${isCenter ? '<span class="meta-chip center-chip" title="队长">Center</span>' : ""}
+                <div class="replace-slot-name">${escHtml(displayCard?.member_name || card?.member_name || code || `#${displayIdx + 1}`)}</div>
+              </div>
               <button
                 type="button"
                 class="replace-owned-btn ${owned ? "active" : ""}"
@@ -3776,7 +4041,10 @@ function renderTeamReplaceModal() {
   renderTeamReplaceMemberPicker(ctx);
 
   const pickedCard = baseCards[ctx.slotIndex];
-  hint.textContent = `正在替换第 ${ctx.slotIndex + 1} 位：${pickedCard ? `${pickedCard.member_name}[${pickedCard.title}]` : "-"}`;
+  const pickedIsCenter = ctx.slotIndex === centerSlotIndex;
+  const pickedDisplayPos = Number(displayPositionBySlotIndex.get(ctx.slotIndex) || 0);
+  const pickedSlotLabel = pickedIsCenter ? "Center位（中间）" : `第 ${pickedDisplayPos || ctx.slotIndex + 1} 位`;
+  hint.textContent = `正在替换${pickedSlotLabel}：${pickedCard ? `${pickedCard.member_name}[${pickedCard.title}]` : "-"}`;
 
   const { total, rows } = buildTeamReplaceCandidates(ctx);
   countNode.textContent = `候选卡: ${total}（最多显示260）`;
@@ -3815,7 +4083,17 @@ function renderTeamReplaceModal() {
                   type="button"
                   class="btn-sub tiny"
                   data-replace-choose="${escHtml(c.code)}"
-                >${r.selected ? "已选择" : r.inTeamElsewhere ? `与第${r.existingSlotIndex + 1}位互换` : "替换为此卡"}</button>
+                >${
+                  r.selected
+                    ? "已选择"
+                    : r.inTeamElsewhere
+                      ? `与${
+                          r.existingSlotIndex === centerSlotIndex
+                            ? "Center位（中间）"
+                            : `第${displayPositionBySlotIndex.get(r.existingSlotIndex) || r.existingSlotIndex + 1}位`
+                        }互换`
+                      : "替换为此卡"
+                }</button>
               </div>
             </div>
           `;
@@ -4038,6 +4316,25 @@ async function bootstrap() {
   rebuildMemberNameAliasMap();
   state.songs = (data.songs || []).filter((s) => s.zawa_available);
   state.defaults = data.defaults || {};
+  const costumeDefaults = state.defaults.costume || {};
+  const officeDefaults = state.defaults.office || {};
+  const frontSkinDefaults = state.defaults.front_skin || {};
+  const setInputValue = (id, value, fallback) => {
+    const el = $(id);
+    if (!el) return;
+    const next = value ?? fallback;
+    el.value = String(next ?? "");
+  };
+  setInputValue("costumeVo", costumeDefaults.vo, 125);
+  setInputValue("costumeDa", costumeDefaults.da, 125);
+  setInputValue("costumePe", costumeDefaults.pe, 125);
+  setInputValue("costumeSkillPerCard", costumeDefaults.skill, 10);
+  setInputValue("sceneSkillPerCard", state.defaults.scene_skill_per_card, 430);
+  setInputValue("officeVo", officeDefaults.vo, 0.17);
+  setInputValue("officeDa", officeDefaults.da, 0.17);
+  setInputValue("officePe", officeDefaults.pe, 0.17);
+  setInputValue("skinEnabled", frontSkinDefaults.enabled === false ? "off" : "on", "on");
+  setInputValue("skinMode", normalizeSkinMode(frontSkinDefaults.profile, "auto"), "auto");
   state.memberPoints = { ...(state.defaults.member_points || {}) };
   state.baseMemberPoints = { ...(state.defaults.member_points || {}) };
   state.memberPointOverrides.clear();

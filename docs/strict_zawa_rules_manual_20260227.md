@@ -29,6 +29,8 @@
 - 默认用 `全卡池`（即“现役名单 + T1(期待值>=3.0)`，并保留全部V/S卡）做Top5优化。
 - 也可切为“仅持有卡池”做个人账号定制优化。
 - 若未手动指定“队长候选”，优化器自动在 `Véaut / S.teller` 队长池搜索。
+- V/S技能发动率链路口径:
+- `Véaut` 与 `S.teller` 都会吸收前排同 source_type 的技能发动率效果，并按中心链倍率缩放（例: `2.25x` 在 `0.7` 链下生效为 `1.875x`，即 `+87.5%`）。
 - `axis_t1` 候选优先级（默认）:
 - 歌曲主色 + 主轴单偏T1 > 歌曲主色 + 主轴双偏T1 > V/S副色 + 主轴单偏T1 > V/S副色 + 主轴双偏T1 > 三偏T1 > 其余。
 - 若队长为V卡，自动把V卡副色纳入候选优先级；不排除异色V卡队长。
@@ -44,14 +46,24 @@
 - 默认“最佳配置”参数（用于组队算分）:
 - 服装: 每人 `Vo+125 / Da+125 / Pe+125`。
 - 家具(office): `Vo+17% / Da+17% / Pe+17%`（按卡面三围逐卡上取整后求和）。
-- front skin: `8%`（默认按歌曲同色目标；`auto` 轴向规则为：
-- `sum_vo -> vo+da`
-- `sum_da -> da+pe`
-- `sum_pe -> pe+vo`
-- `sum_vo_da -> vo+da`
-- `sum_da_pe -> da+pe`
-- `sum_vo_pe -> vo+pe`
-- 可手动指定vo/da/pe覆盖）。
+- front skin: 皮肤档位固定为：
+- 单偏：单轴 `+9%`（Vo或Da或Pe）
+- 双偏：双轴各 `+8%`（Vo+Da / Da+Pe / Vo+Pe）
+- 三偏：三轴各 `+5%`（Vo+Da+Pe）
+- `auto` 轴向规则：
+- `sum_vo -> max(vo+da, vo+pe)`（各8%，按当前队伍/歌曲色目标下 skin_total 取高）
+- `sum_da -> max(vo+da, da+pe)`（各8%，按当前队伍/歌曲色目标下 skin_total 取高）
+- `sum_pe -> max(vo+pe, da+pe)`（各8%，按当前队伍/歌曲色目标下 skin_total 取高）
+- `sum_vo_da -> vo+da(各8%)`
+- `sum_da_pe -> da+pe(各8%)`
+- `sum_vo_pe -> vo+pe(各8%)`
+- 其他模式（如 `sum_all/max_each`）-> `vo+da+pe(各5%)`
+- `auto` 目标类型规则（用于优化器与评估）:
+- 若 `front_skin_target_color` 显式指定（如 `R` / `R,G` / `all`），按指定生效。
+- 若 `front_skin_target_color=song` 且 `profile=auto`，会在候选目标类型中择优（含歌曲色、队长 source_type、前排颜色单色/双色组合）。
+- 因此在 `V` 队长 + 复色前排场景下，可能自动落到 `RED・GREEN` 这类双色皮肤（例如 `Vo、Daが8%アップ`）而非单一歌曲色。
+- 示例：队长 `村山美羽 Véaut(sum_vo_da, source=GREEN+RED)`，前排含 `金村美玖 Véaut(GREEN)` 与 `青春の馬 金村美玖(RED)` 时，`auto` 会优先比较并可落到 `R,G + Vo、Daが8%アップ`。
+- 兼容旧协议：仍接受 `front_skin_rate/front_skin_axes` 或 `front_skin_vo_rate/da/pe_rate` 覆盖。
 - skill条目: 每人 `scene 430 + costume 10`（默认总计 `440*5=2200`）。
 - 去重口径:
 - Top队伍按“5卡集合”去重；仅队长/队员位置互换但5卡相同，视为同一队，不重复上榜。
