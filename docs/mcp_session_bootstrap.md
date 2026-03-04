@@ -24,10 +24,13 @@
 
 1. 先在 `spec` 确认口径和边界。
 2. 定位功能对应代码入口（见第 2 节）。
-3. 修改代码后同步更新:
+3. 提交前先确认 Git 身份:
+   - `git config user.name` = `konnagi0707`
+   - `git config user.email` = `konnagi0707@users.noreply.github.com`
+4. 修改代码后同步更新:
    - `README.md`（用户可见行为变化）
    - `docs/spec_coding_uoa_scoring_app.md`（接口/口径/结构变化）
-4. 给出验证步骤（最少包含本地启动 + 关键流程复测）。
+5. 给出验证步骤（最少包含本地启动 + 关键流程复测）。
 
 ## 4. 最小验证清单
 

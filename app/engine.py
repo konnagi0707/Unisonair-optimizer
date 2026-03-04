@@ -28,6 +28,23 @@ if str(TOOLS_DIR) not in sys.path:
 
 import optimize_vs_base_teams as opt
 import zawa_score_model as zsm
+from .engine_parts.effect_summary import team_effect_summary as _team_effect_summary
+from .engine_parts.scene_keys import kosa_color_to_short as _kosa_color_to_short
+from .engine_parts.scene_keys import norm_scene_title as _norm_scene_title
+from .engine_parts.scene_keys import scene_match_key as _scene_match_key
+from .engine_parts.scene_keys import scene_member_color_key as _scene_member_color_key
+from .engine_parts.scene_keys import scene_member_key as _scene_member_key
+from .engine_parts.scene_keys import scene_title_key as _scene_title_key
+from .engine_parts.skin_target import auto_skin_candidate_targets as _auto_skin_candidate_targets
+from .engine_parts.skin_target import auto_skin_axes as _auto_skin_axes
+from .engine_parts.skin_target import auto_skin_candidate_rates as _auto_skin_candidate_rates
+from .engine_parts.skin_target import color_set_from_target_mode as _color_set_from_target_mode
+from .engine_parts.skin_target import is_valid_skin_target_mode as _is_valid_skin_target_mode
+from .engine_parts.skin_target import normalize_color_code as _normalize_color_code
+from .engine_parts.skin_target import optional_rate_value as _optional_rate_value
+from .engine_parts.skin_target import parse_axes as _parse_axes
+from .engine_parts.skin_target import serialize_color_set as _serialize_color_set
+from .engine_parts.skin_target import skin_axis_rates_by_profile as _skin_axis_rates_by_profile
 
 AXES = ("vo", "da", "pe")
 VALID_COLORS = {"R", "B", "G", "Y", "P", "ALL"}
@@ -126,86 +143,6 @@ def _center_focus_axes(center: opt.Card) -> set[str]:
     return {"vo", "da", "pe"}
 
 
-def _auto_skin_axes(center: opt.Card) -> set[str]:
-    rule = center.vs_rule
-    mode = (rule.mode if rule else "").strip()
-    if mode == "sum_vo":
-        return {"vo", "da"}
-    if mode == "sum_da":
-        return {"da", "pe"}
-    if mode == "sum_pe":
-        return {"vo", "pe"}
-    if mode == "sum_vo_da":
-        return {"vo", "da"}
-    if mode == "sum_da_pe":
-        return {"da", "pe"}
-    if mode == "sum_vo_pe":
-        return {"vo", "pe"}
-    return {"vo", "da", "pe"}
-
-
-def _auto_skin_candidate_rates(center: opt.Card) -> list[dict[str, float]]:
-    def axis_rates(axes: set[str], rate: float) -> dict[str, float]:
-        r = max(0.0, float(rate))
-        return {
-            "vo": r if "vo" in axes else 0.0,
-            "da": r if "da" in axes else 0.0,
-            "pe": r if "pe" in axes else 0.0,
-        }
-
-    rule = center.vs_rule
-    mode = (rule.mode if rule else "").strip()
-    if mode == "sum_vo":
-        return [axis_rates({"vo", "da"}, 0.08), axis_rates({"vo", "pe"}, 0.08)]
-    if mode == "sum_da":
-        return [axis_rates({"vo", "da"}, 0.08), axis_rates({"da", "pe"}, 0.08)]
-    if mode == "sum_pe":
-        return [axis_rates({"vo", "pe"}, 0.08), axis_rates({"da", "pe"}, 0.08)]
-    if mode == "sum_vo_da":
-        return [axis_rates({"vo", "da"}, 0.08)]
-    if mode == "sum_da_pe":
-        return [axis_rates({"da", "pe"}, 0.08)]
-    if mode == "sum_vo_pe":
-        return [axis_rates({"vo", "pe"}, 0.08)]
-    return [axis_rates({"vo", "da", "pe"}, 0.05)]
-
-
-def _skin_axis_rates_by_profile(
-    profile: str | None,
-    center: opt.Card,
-) -> dict[str, float]:
-    def axis_rates(axes: set[str], rate: float) -> dict[str, float]:
-        r = max(0.0, float(rate))
-        return {
-            "vo": r if "vo" in axes else 0.0,
-            "da": r if "da" in axes else 0.0,
-            "pe": r if "pe" in axes else 0.0,
-        }
-
-    p = str(profile or "auto").strip().lower()
-    if p in {"off", "none", "disabled"}:
-        return {"vo": 0.0, "da": 0.0, "pe": 0.0}
-
-    if p in {"single_vo", "vo", "vo_only", "vo_single"}:
-        return axis_rates({"vo"}, 0.09)
-    if p in {"single_da", "da", "da_only", "da_single"}:
-        return axis_rates({"da"}, 0.09)
-    if p in {"single_pe", "pe", "pe_only", "pe_single"}:
-        return axis_rates({"pe"}, 0.09)
-
-    if p in {"dual_vo_da", "vo_da", "voda", "vo-da"}:
-        return axis_rates({"vo", "da"}, 0.08)
-    if p in {"dual_da_pe", "da_pe", "dape", "da-pe"}:
-        return axis_rates({"da", "pe"}, 0.08)
-    if p in {"dual_vo_pe", "vo_pe", "vope", "vo-pe"}:
-        return axis_rates({"vo", "pe"}, 0.08)
-
-    if p in {"triple_all", "vo_da_pe", "all", "triple", "3axis"}:
-        return axis_rates({"vo", "da", "pe"}, 0.05)
-
-    return _auto_skin_candidate_rates(center)[0]
-
-
 def _type_bonus_total(cards: list[opt.Card], song_color: str, rate: float) -> int:
     if rate <= 0.0:
         return 0
@@ -255,148 +192,6 @@ def _skin_bonus_total(
         if pe_rate > 0.0:
             total += int(math.ceil(float(c.pe) * pe_rate))
     return int(total)
-
-
-_COLOR_WORD_TO_CODE = {
-    "R": "R",
-    "B": "B",
-    "G": "G",
-    "Y": "Y",
-    "P": "P",
-    "ALL": "ALL",
-    "RED": "R",
-    "BLUE": "B",
-    "GREEN": "G",
-    "YELLOW": "Y",
-    "PURPLE": "P",
-}
-
-
-def _normalize_color_code(token: str | None) -> str | None:
-    text = str(token or "").strip().upper()
-    if not text:
-        return None
-    return _COLOR_WORD_TO_CODE.get(text)
-
-
-def _color_set_from_target_mode(target_color_mode: str, *, song_color: str) -> set[str] | None:
-    mode_raw = str(target_color_mode or "song").strip()
-    mode = mode_raw.lower()
-    if mode in {"song", ""}:
-        sc = _normalize_color_code(song_color) or "ALL"
-        return None if sc == "ALL" else {sc}
-    if mode == "all":
-        return None
-
-    tokens = re.split(r"[,+/&|・\s]+", mode_raw)
-    colors: set[str] = set()
-    for tok in tokens:
-        code = _normalize_color_code(tok)
-        if code == "ALL":
-            return None
-        if code:
-            colors.add(code)
-    if colors:
-        return colors
-
-    upper = mode_raw.upper()
-    for word in re.findall(r"(RED|BLUE|GREEN|YELLOW|PURPLE|ALL)", upper):
-        code = _normalize_color_code(word)
-        if code == "ALL":
-            return None
-        if code:
-            colors.add(code)
-    if colors:
-        return colors
-
-    sc = _normalize_color_code(song_color) or "ALL"
-    return None if sc == "ALL" else {sc}
-
-
-def _serialize_color_set(colors: set[str] | None) -> str:
-    if colors is None:
-        return "all"
-    if not colors:
-        return "song"
-    return ",".join(sorted(colors))
-
-
-def _is_valid_skin_target_mode(raw_mode: str | None) -> bool:
-    mode_raw = str(raw_mode or "").strip()
-    if not mode_raw:
-        return False
-    mode = mode_raw.lower()
-    if mode in {"song", "all"}:
-        return True
-
-    tokens = [tok for tok in re.split(r"[,+/&|・\s]+", mode_raw) if tok.strip()]
-    if not tokens:
-        return False
-    if len(tokens) > 1 and any((_normalize_color_code(tok) == "ALL") for tok in tokens):
-        return False
-    return all(_normalize_color_code(tok) is not None for tok in tokens)
-
-
-def _auto_skin_candidate_targets(center: opt.Card, cards: list[opt.Card], *, song_color: str) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def add(mode: str) -> None:
-        key = str(mode).strip().lower()
-        if not key or key in seen:
-            return
-        seen.add(key)
-        out.append(str(mode).strip())
-
-    add("song")
-
-    source_types = sorted(
-        {
-            c
-            for c in (center.vs_rule.source_types if center.vs_rule else set())
-            if c in {"R", "B", "G", "Y", "P"}
-        }
-    )
-    if source_types:
-        if len(source_types) >= 2:
-            add(",".join(source_types[:2]))
-        for color in source_types:
-            add(color)
-
-    team_colors = sorted({c.color for c in cards if c.color in {"R", "B", "G", "Y", "P"}})
-    for color in team_colors:
-        add(color)
-    for i in range(len(team_colors)):
-        for j in range(i + 1, len(team_colors)):
-            add(f"{team_colors[i]},{team_colors[j]}")
-    return out
-
-
-def _parse_axes(raw: str | list[str] | None) -> set[str]:
-    if raw is None:
-        return set()
-    if isinstance(raw, list):
-        vals = [str(x).strip().lower() for x in raw if str(x).strip()]
-    else:
-        vals = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
-    out = set(vals)
-    if "auto" in out:
-        return {"auto"}
-    valid = {"vo", "da", "pe"}
-    return {x for x in out if x in valid}
-
-
-def _optional_rate_value(value: Any) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        out = float(text)
-    except Exception:
-        return None
-    return max(0.0, out)
 
 
 def _resolve_skin_axis_rates(
@@ -470,47 +265,6 @@ def _resolve_skin_axis_rates(
         },
         target_mode,
     )
-
-
-def _team_effect_summary(cards: list[opt.Card], center: opt.Card) -> str:
-    if not center.vs_rule:
-        return center.leader_desc or center.leader_name or ""
-
-    parts: list[str] = []
-    agg = opt._aggregate_center_bonus(cards, center, center.vs_rule)
-    target_types = "・".join(sorted(center.vs_rule.agg_target_types))
-    if agg.get("vo", 0.0) > 0.0:
-        parts.append(f"{target_types}タイプのVoが{agg['vo']:.1f}%アップ")
-    if agg.get("da", 0.0) > 0.0:
-        parts.append(f"{target_types}タイプのDaが{agg['da']:.1f}%アップ")
-    if agg.get("pe", 0.0) > 0.0:
-        parts.append(f"{target_types}タイプのPeが{agg['pe']:.1f}%アップ")
-
-    zero_axes = opt._mode_zero_axes(center.vs_rule.mode)
-    if zero_axes:
-        keep = [a for a in ("Vo", "Da", "Pe") if a.lower() not in zero_axes]
-        zero = [a for a in ("Vo", "Da", "Pe") if a.lower() in zero_axes]
-        parts.append(f"{'・'.join(keep)}のみ合算（{'・'.join(zero)}を0として計算）")
-
-    color_mult, member_mult = opt._collect_skill_rate_multipliers(cards, center)
-    for color in ("R", "B", "G", "Y", "P"):
-        val = float(color_mult.get(color, 1.0))
-        if val > 1.0001:
-            parts.append(f"{color}タイプのスキル発動率が{(val - 1.0) * 100.0:.1f}%アップ")
-
-    seen_members: set[str] = set()
-    for c in cards:
-        key = c.member_name_norm
-        if key in seen_members:
-            continue
-        if not opt._member_rate_applies_to_card(c, center):
-            continue
-        seen_members.add(key)
-        val = float(member_mult.get(key, 1.0))
-        if val > 1.0001:
-            parts.append(f"{c.member_name}のスキル発動率が{(val - 1.0) * 100.0:.1f}%アップ")
-
-    return " / ".join(parts)
 
 
 def _pick_latest_catalog(catalog_dir: Path) -> Path | None:
@@ -672,47 +426,6 @@ def _resolve_client_assets_version() -> str:
         except Exception:
             pass
     return DEFAULT_CLIENT_ASSETS_VERSION
-
-
-def _kosa_color_to_short(color: str) -> str:
-    c = str(color or "").strip().upper()
-    if c == "RED":
-        return "R"
-    if c == "BLUE":
-        return "B"
-    if c == "GREEN":
-        return "G"
-    if c == "YELLOW":
-        return "Y"
-    if c == "PURPLE":
-        return "P"
-    if c == "ALL":
-        return "ALL"
-    return c[:1] if c else ""
-
-
-def _scene_match_key(member_name: str, color: str, vo: int, da: int, pe: int) -> str:
-    return f"{opt._normalize_name(member_name)}|{color}|{int(vo)}|{int(da)}|{int(pe)}"
-
-
-def _scene_member_color_key(member_name: str, color: str) -> str:
-    return f"{opt._normalize_name(member_name)}|{color}"
-
-
-def _scene_member_key(member_name: str) -> str:
-    return opt._normalize_name(member_name)
-
-
-def _norm_scene_title(title: str | None) -> str:
-    raw = str(title or "")
-    raw = raw.replace("’", "'").replace("‘", "'").replace("　", " ")
-    raw = re.sub(r"\s+", "", raw.strip().lower())
-    raw = re.sub(r"[\"'`]", "", raw)
-    return raw
-
-
-def _scene_title_key(member_name: str, color: str, title: str | None) -> str:
-    return f"{opt._normalize_name(member_name)}|{color}|{_norm_scene_title(title)}"
 
 
 def _build_series_tags(*, title: str, is_vs_base: bool) -> list[str]:

@@ -50,7 +50,10 @@
 | 路径 | 角色 | 备注 |
 | --- | --- | --- |
 | `app/main.py` | API 入口、请求模型、优化任务管理、账号 CRUD | 任务内存保留 24h，最多 120 条 |
-| `app/engine.py` | 数据加载、卡面装配、图标解析、算分、优化 | 核心业务逻辑 |
+| `app/engine.py` | 数据加载、卡面装配、图标解析、算分、优化 | 核心业务逻辑（编排层） |
+| `app/engine_parts/skin_target.py` | skin 目标色/轴向解析、profile 规则映射、候选目标生成 | 从 `engine.py` 抽离的纯函数模块（无行为改动） |
+| `app/engine_parts/effect_summary.py` | 队伍“发动效果”文案拼装 | 从 `engine.py` 抽离的纯函数模块（无行为改动） |
+| `app/engine_parts/scene_keys.py` | kosa 场景颜色/标题归一化与匹配键生成 | 从 `engine.py` 抽离的纯函数模块（无行为改动） |
 | `app/static/index.html` | 页面骨架与模块结构 | 左筛选 + 右算分/卡列表 + 底部结果 |
 | `app/static/app.js` | 前端状态机与交互 | 账号、筛选、算分、优化、换卡对比 |
 | `app/static/styles.css` | 样式与布局 | 双栏、弹窗、结果卡、响应式 |
@@ -169,6 +172,7 @@
 - `pool_scope`: `all | owned`
 - `owned_card_codes`: `pool_scope=owned` 时至少 5 张
 - `center_card_codes` / `must_include_codes` / `top_n` / `sort_by`
+- `disable_signature_check`（可选，默认 `false`）: 关闭“`center + sorted(4 supports)`”去重，仅用于性能/回归对比
 
 ### 7.4 `POST /api/optimize/jobs`
 

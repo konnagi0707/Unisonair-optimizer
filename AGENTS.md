@@ -12,6 +12,17 @@ This repo is a **personal** workflow to diff UOA updates and export:
 - Prefer data that is already locally downloaded (BlueStacks cache) and/or officially accessible.
 - Never store secrets (passwords, tokens) in repo files.
 
+## Git Commit Identity (Hard Rule)
+- All commits in this repo MUST use:
+  - `user.name = konnagi0707`
+  - `user.email = konnagi0707@users.noreply.github.com`
+- Never commit with real name or machine-local email.
+- Before any commit, verify identity:
+  - `git config user.name`
+  - `git config user.email`
+- If identity is wrong, fix it before commit (repo-local or global config).
+- If a wrong-identity commit was already created, rewrite/fix commit history before pushing.
+
 ## Output Contract (每次解析一个新文件夹)
 For each update analysis, create a new directory:
 - `update/<RUN_TS>_masters_<TARGET_MASTERS>/`

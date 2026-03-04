@@ -93,11 +93,14 @@ python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765
 
 ## 4. 每次提交前检查清单
 
-1. 启动服务可用。
-2. `python3 tools/refactor_guard.py` 通过。
-3. `python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765` 通过。
-4. 手工验证至少 1 套目标队伍（当前用户常用歌/常用队）。
-5. 文档更新完毕（README + docs 索引 + spec）。
+1. Git 提交身份正确（硬规则）:
+   - `git config user.name` 必须是 `konnagi0707`
+   - `git config user.email` 必须是 `konnagi0707@users.noreply.github.com`
+2. 启动服务可用。
+3. `python3 tools/refactor_guard.py` 通过。
+4. `python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765` 通过。
+5. 手工验证至少 1 套目标队伍（当前用户常用歌/常用队）。
+6. 文档更新完毕（README + docs 索引 + spec）。
 
 ---
 
@@ -158,3 +161,38 @@ python3 tools/bug_sweep.py --host 127.0.0.1 --port 8765
 
 - 先保证每次改动都可验证、可回退；
 - 再逐块拆分，持续降低单文件复杂度。
+
+## 8. 已落地的最小拆分记录
+
+补充: 后续待拆分热点与优先级见 `docs/refactor_backlog_by_size_20260304.md`。
+
+- 2026-03-04（第 1 步）:
+  - 新增 `app/engine_parts/skin_target.py`。
+  - 从 `app/engine.py` 抽离 skin 目标色解析与候选目标生成的纯函数（无口径变更）。
+  - 护栏结果: `refactor_guard` PASS，`bug_sweep` PASS。
+- 2026-03-04（第 2 步）:
+  - 将 `front_skin_axes/front_skin_rate` 的基础解析函数一并迁入 `app/engine_parts/skin_target.py`：
+    - `parse_axes`
+    - `optional_rate_value`
+  - `app/engine.py` 改为导入调用，算法与参数语义不变（零行为变更）。
+- 2026-03-04（第 3 步）:
+  - 将 skin 规则映射纯函数迁入 `app/engine_parts/skin_target.py`：
+    - `auto_skin_axes`
+    - `auto_skin_candidate_rates`
+    - `skin_axis_rates_by_profile`
+  - `app/engine.py` 仅保留编排逻辑并导入调用（零行为变更）。
+- 2026-03-04（第 4 步）:
+  - 新增 `app/engine_parts/effect_summary.py`。
+  - 将队伍发动效果文案拼装函数迁移为独立纯函数：
+    - `team_effect_summary`
+  - `app/engine.py` 改为导入调用（零行为变更）。
+- 2026-03-04（第 5 步）:
+  - 新增 `app/engine_parts/scene_keys.py`。
+  - 将 kosa 场景匹配相关纯函数迁移：
+    - `kosa_color_to_short`
+    - `scene_match_key`
+    - `scene_member_color_key`
+    - `scene_member_key`
+    - `norm_scene_title`
+    - `scene_title_key`
+  - `app/engine.py` 改为导入调用（零行为变更）。

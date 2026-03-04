@@ -117,6 +117,7 @@ class OptimizeRequest(BaseModel):
     final_eval_count: int = 0
     candidate_strategy: str = "default"  # default | axis_t1
     opt_min_skill_expected: float = 3.0
+    disable_signature_check: bool = False
 
     enable_costume: bool = True
     costume_vo: int = 125
