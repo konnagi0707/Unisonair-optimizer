@@ -2933,14 +2933,15 @@ th {
 
 .replace-search-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(150px, 0.85fr) minmax(150px, 0.85fr);
+  grid-template-columns: minmax(0, 1.45fr) repeat(3, minmax(140px, 0.72fr));
   gap: 0.14rem;
   align-items: end;
 }
 
 .replace-search-field,
 .replace-scope-field,
-.replace-own-field {
+.replace-own-field,
+.replace-sort-field {
   display: grid;
   grid-template-rows: auto 40px;
   gap: 0.08rem;
@@ -2949,7 +2950,8 @@ th {
 
 .replace-search-field > span,
 .replace-scope-field > span,
-.replace-own-field > span {
+.replace-own-field > span,
+.replace-sort-field > span {
   font-size: 0.72rem;
   color: #6b8190;
   font-weight: 700;
@@ -3004,7 +3006,8 @@ th {
   align-self: stretch;
 }
 
-.replace-own-field select {
+.replace-own-field select,
+.replace-sort-field select {
   height: 40px;
   min-height: 40px;
   line-height: 40px;

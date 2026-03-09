@@ -38,6 +38,7 @@ const state = {
   excludedFilterColors: new Set(),
   excludedFilterGroups: new Set(),
   excludedFilterSeries: new Set(),
+  teamReplaceSortKey: "expected_desc",
   teamReplace: null,
 };
 
@@ -51,6 +52,15 @@ let teamReplaceCalcToken = 0;
 
 function colorClass(color) {
   return ["R", "B", "G", "Y", "P"].includes(color) ? color : "P";
+}
+
+function compareCardBySortKey(a, b, key) {
+  if (key === "expected_desc") return Number(b.skill_expected || 0) - Number(a.skill_expected || 0);
+  if (key === "vo_desc") return Number(b.vo || 0) - Number(a.vo || 0);
+  if (key === "da_desc") return Number(b.da || 0) - Number(a.da || 0);
+  if (key === "pe_desc") return Number(b.pe || 0) - Number(a.pe || 0);
+  if (key === "power_desc") return Number(b.power || 0) - Number(a.power || 0);
+  return 0;
 }
 
 const COLOR_LONG = {
@@ -88,6 +98,10 @@ const SORT_FILTER_OPTIONS = [
   { key: "da_desc", label: "Da 高→低" },
   { key: "pe_desc", label: "Pe 高→低" },
   { key: "power_desc", label: "总和 高→低" },
+];
+const TEAM_REPLACE_SORT_OPTIONS = [
+  { key: "expected_desc", label: "期望值 高→低" },
+  ...SORT_FILTER_OPTIONS,
 ];
 const MAX_MUST_INCLUDE = 5;
 const DEFAULT_MEMBER_POINT = 15000;
@@ -2833,16 +2847,9 @@ function renderCardList() {
   const sortKeys = [...state.selectedSortKeys];
   const sorted = [...filtered];
   if (sortKeys.length > 0) {
-    const cmp = (a, b, key) => {
-      if (key === "vo_desc") return Number(b.vo || 0) - Number(a.vo || 0);
-      if (key === "da_desc") return Number(b.da || 0) - Number(a.da || 0);
-      if (key === "pe_desc") return Number(b.pe || 0) - Number(a.pe || 0);
-      if (key === "power_desc") return Number(b.power || 0) - Number(a.power || 0);
-      return 0;
-    };
     sorted.sort((a, b) => {
       for (const key of sortKeys) {
-        const d = cmp(a, b, key);
+        const d = compareCardBySortKey(a, b, key);
         if (d !== 0) return d;
       }
       return Number(b.skill_expected || 0) - Number(a.skill_expected || 0) || String(a.code).localeCompare(String(b.code));
@@ -3909,6 +3916,9 @@ function openTeamReplaceModal(teamIndex, slotIndex) {
     filterMembers: new Set([...state.selectedMembers]),
     poolScope: "all",
     ownFilter: "all",
+    sortKey: TEAM_REPLACE_SORT_OPTIONS.some((opt) => opt.key === state.teamReplaceSortKey)
+      ? state.teamReplaceSortKey
+      : "expected_desc",
     compareLoading: false,
     compareError: "",
     compareResult: null,
@@ -4092,13 +4102,14 @@ function renderTeamReplaceMemberPicker(ctx) {
 function buildTeamReplaceCandidates(ctx) {
   const currentSlotCode = ctx.currentCodes[ctx.slotIndex];
   const filtered = state.cards.filter((card) => cardMatchesTeamReplaceFilters(card, ctx));
+  const sortKey = TEAM_REPLACE_SORT_OPTIONS.some((opt) => opt.key === ctx.sortKey) ? ctx.sortKey : "expected_desc";
   const sorted = [...filtered].sort((a, b) => {
-    const ea = Number(a.skill_expected || 0);
-    const eb = Number(b.skill_expected || 0);
-    if (eb !== ea) return eb - ea;
-    const pa = Number(a.power || 0);
-    const pb = Number(b.power || 0);
-    if (pb !== pa) return pb - pa;
+    const primary = compareCardBySortKey(a, b, sortKey);
+    if (primary !== 0) return primary;
+    const expected = compareCardBySortKey(a, b, "expected_desc");
+    if (expected !== 0) return expected;
+    const power = compareCardBySortKey(a, b, "power_desc");
+    if (power !== 0) return power;
     return String(a.code).localeCompare(String(b.code));
   });
   const rows = sorted.map((card) => {
@@ -4261,11 +4272,12 @@ function renderTeamReplaceModal() {
   const searchInput = $("teamReplaceSearch");
   const scopeSel = $("teamReplacePoolScope");
   const ownFilterSel = $("teamReplaceOwnFilter");
+  const sortSel = $("teamReplaceSort");
   const clearMembersBtn = $("teamReplaceClearMembersBtn");
   const listWrap = $("teamReplaceCandidates");
   const countNode = $("teamReplaceCount");
   const calcBtn = $("teamReplaceCalcBtn");
-  if (!teamCardsWrap || !hint || !searchInput || !scopeSel || !ownFilterSel || !listWrap || !countNode) return;
+  if (!teamCardsWrap || !hint || !searchInput || !scopeSel || !ownFilterSel || !sortSel || !listWrap || !countNode) return;
 
   const baseCards = ctx.currentCodes.map((code) => getCardByCode(code) || (team?.team?.cards || []).find((x) => x.code === code));
   const centerCode = String(team?.team?.center?.code || ctx.baseCodes?.[0] || "").trim();
@@ -4371,6 +4383,8 @@ function renderTeamReplaceModal() {
   const options = getTeamReplaceFilterOptions(ctx);
   const ownFilterValue = String(ctx.ownFilter || "all");
   ctx.ownFilter = ["all", "owned", "unowned"].includes(ownFilterValue) ? ownFilterValue : "all";
+  const sortKeySet = new Set(TEAM_REPLACE_SORT_OPTIONS.map((x) => x.key));
+  ctx.sortKey = sortKeySet.has(String(ctx.sortKey || "")) ? String(ctx.sortKey) : "expected_desc";
   const colorKeys = new Set(options.colorOptions.map((x) => x.key));
   const groupKeys = new Set(options.groupOptions.map((x) => x.key));
   const seriesKeys = new Set(options.seriesOptions);
@@ -4380,6 +4394,7 @@ function renderTeamReplaceModal() {
   searchInput.value = ctx.filterText;
   scopeSel.value = ctx.poolScope;
   ownFilterSel.value = ctx.ownFilter;
+  sortSel.value = ctx.sortKey;
   if (clearMembersBtn) {
     clearMembersBtn.disabled = ctx.filterMembers.size === 0;
     clearMembersBtn.onclick = () => {
@@ -4998,6 +5013,15 @@ function bindEvents() {
     if (!state.teamReplace) return;
     const val = String(e.target.value || "all");
     state.teamReplace.ownFilter = ["all", "owned", "unowned"].includes(val) ? val : "all";
+    renderTeamReplaceModal();
+  });
+  const teamReplaceSort = $("teamReplaceSort");
+  if (teamReplaceSort) teamReplaceSort.addEventListener("change", (e) => {
+    const val = String(e.target.value || "expected_desc");
+    const next = TEAM_REPLACE_SORT_OPTIONS.some((opt) => opt.key === val) ? val : "expected_desc";
+    state.teamReplaceSortKey = next;
+    if (!state.teamReplace) return;
+    state.teamReplace.sortKey = next;
     renderTeamReplaceModal();
   });
   const teamReplaceCalcBtn = $("teamReplaceCalcBtn");
